@@ -299,7 +299,6 @@ export function LibraryPage({ onOpenDetail }: { onOpenDetail: (id: string) => vo
   const [picked, setPicked] = useState<Set<string>>(new Set());
   // 锚定菜单（加入列表 / 独立模式启用选屏）与内联新建
   const [addMenuAt, setAddMenuAt] = useState<{ x: number; y: number } | null>(null);
-  const [enableAt, setEnableAt] = useState<{ x: number; y: number; p: Playlist } | null>(null);
   const [newName, setNewName] = useState("");
   const [creating, setCreating] = useState(false);
   // 列表上下文条的内联编辑
@@ -610,20 +609,25 @@ export function LibraryPage({ onOpenDetail }: { onOpenDetail: (id: string) => vo
           </button>
         )}
 
-        {/* 轮播运行指示 + 快捷控制 */}
-        {(plStatus?.active || boundNames.size > 0) && (
+        {/* 轮播运行指示 + 快捷控制（唯一的启动/暂停入口：启用轮播按钮已移除） */}
+        {(plStatus?.active || boundNames.size > 0 || activeList) && (() => {
+          const running = Boolean(plStatus?.active || boundNames.size > 0);
+          return (
           <span className="ml-auto flex items-center gap-2 rounded-full bg-[var(--accent)]/10 px-3 py-0.5 text-[12px] text-[var(--text-2)]">
             <span className="text-[var(--accent-strong)]">▶</span>
             <span className="font-medium text-[var(--text-1)]">
-              {plStatus?.active && plStatus.mode !== "independent"
-                ? tr("轮播：{name} {i}/{t}", {
-                    name: plStatus.name ?? "",
-                    i: (plStatus.index ?? 0) + 1,
-                    t: plStatus.total ?? 0,
-                  })
-                : tr("{n} 块屏在轮播", { n: boundNames.size })}
+              {!running && activeList
+                ? tr("「{name}」未在轮播", { name: activeList.name })
+                : plStatus?.active && plStatus.mode !== "independent"
+                  ? tr("轮播：{name} {i}/{t}", {
+                      name: plStatus.name ?? "",
+                      i: (plStatus.index ?? 0) + 1,
+                      t: plStatus.total ?? 0,
+                    })
+                  : tr("{n} 块屏在轮播", { n: boundNames.size })}
             </span>
-            {plStatus?.active &&
+            {running &&
+              plStatus?.active &&
               plStatus.mode !== "independent" &&
               (plStatus.paused ? (
                 <span>{tr("已暂停")}</span>
@@ -631,36 +635,57 @@ export function LibraryPage({ onOpenDetail }: { onOpenDetail: (id: string) => vo
                 <span>{formatCountdown(plStatus.nextAtMs - rotNow)}</span>
               ) : null)}
             <span className="mx-0.5 h-3 w-px bg-[var(--separator)]" />
-            <button
-              title={tr("上一张")}
-              className="hover:text-[var(--accent-strong)]"
-              onClick={() => void plAct(() => api.wallpaperPrev())}
-            >
-              ‹
-            </button>
-            <button
-              title={tr("下一张")}
-              className="hover:text-[var(--accent-strong)]"
-              onClick={() => void plAct(() => api.wallpaperNext())}
-            >
-              ›
-            </button>
-            <button
-              title={plStatus?.paused ? tr("恢复轮播") : tr("暂停轮播")}
-              className="hover:text-[var(--accent-strong)]"
-              onClick={() => void plAct(() => api.wallpaperRotationSet(!plStatus?.paused))}
-            >
-              {plStatus?.paused ? "▶" : "⏸"}
-            </button>
-            <button
-              title={tr("停止轮播")}
-              className="hover:text-red-500"
-              onClick={() => void plAct(() => api.playlistStop(), tr("已停止轮播"))}
-            >
-              ⏹
-            </button>
+            {running && (
+              <>
+                <button
+                  title={tr("上一张")}
+                  className="hover:text-[var(--accent-strong)]"
+                  onClick={() => void plAct(() => api.wallpaperPrev())}
+                >
+                  ‹
+                </button>
+                <button
+                  title={tr("下一张")}
+                  className="hover:text-[var(--accent-strong)]"
+                  onClick={() => void plAct(() => api.wallpaperNext())}
+                >
+                  ›
+                </button>
+              </>
+            )}
+            {running ? (
+              <>
+                <button
+                  title={plStatus?.paused ? tr("恢复轮播") : tr("暂停轮播")}
+                  className="hover:text-[var(--accent-strong)]"
+                  onClick={() => void plAct(() => api.wallpaperRotationSet(!plStatus?.paused))}
+                >
+                  {plStatus?.paused ? "▶" : "⏸"}
+                </button>
+                <button
+                  title={tr("停止轮播")}
+                  className="hover:text-red-500"
+                  onClick={() => void plAct(() => api.playlistStop(), tr("已停止轮播"))}
+                >
+                  ⏹
+                </button>
+              </>
+            ) : dispMode === "independent" ? (
+              <span className="opacity-80">{tr("到「显示器」页选择该列表开始轮播")}</span>
+            ) : (
+              <button
+                title={tr("启用轮播")}
+                className="text-[var(--accent-strong)]"
+                onClick={() =>
+                  void plAct(() => api.playlistApply(activeList!.id), tr("已启用轮播"))
+                }
+              >
+                ▶
+              </button>
+            )}
           </span>
-        )}
+          );
+        })()}
       </div>
 
       {/* 列表上下文条：重命名 / 间隔 / 随机 / 启用 / 删除，全部内联编辑 */}
@@ -737,19 +762,7 @@ export function LibraryPage({ onOpenDetail }: { onOpenDetail: (id: string) => vo
             </span>
           )}
           <div className="ml-auto flex items-center gap-2">
-            <button
-              className="btn btn-primary !py-0.5 text-[11.5px]"
-              onClick={(e) => {
-                if (dispMode === "independent") {
-                  const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-                  setEnableAt({ x: r.left, y: r.bottom, p: activeList });
-                } else {
-                  void plAct(() => api.playlistApply(activeList.id), tr("已启用轮播"));
-                }
-              }}
-            >
-              {tr("启用轮播")}
-            </button>
+            {/* 启用/暂停统一收到上方轮播条（功能与它重合，按钮移除）；删除保留 */}
             <button
               className="btn btn-danger !py-0.5 text-[11.5px]"
               onClick={() => setDeleteList(activeList)}
@@ -1131,27 +1144,6 @@ export function LibraryPage({ onOpenDetail }: { onOpenDetail: (id: string) => vo
             placeholder={tr("新列表名称")}
             submitText={tr("建")}
           />
-        </AnchoredMenu>
-      )}
-
-      {/* 独立模式：启用轮播 = 绑定到目标屏（锚定菜单） */}
-      {enableAt && (
-        <AnchoredMenu x={enableAt.x} y={enableAt.y} drop="down" onClose={() => setEnableAt(null)}>
-          {displays.map((d) => (
-            <MenuItem
-              key={d.id}
-              onClick={() => {
-                const p = enableAt.p;
-                setEnableAt(null);
-                void plAct(
-                  () => api.displayBindingSet(d.id, p.id),
-                  tr("「{name}」开始轮播", { name: d.name }),
-                );
-              }}
-            >
-              {d.name}
-            </MenuItem>
-          ))}
         </AnchoredMenu>
       )}
 

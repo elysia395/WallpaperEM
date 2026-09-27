@@ -4081,7 +4081,13 @@ pub fn display_binding_set(
             return Err("播放列表为空".into());
         }
         save_ctx(&conn, &fresh_ctx(&display_id, p.clone(), 0))?;
+        // 显式绑定列表 = 「开始轮播」：顺带清掉轮播暂停 —— 否则绑定后倒计时是
+        // 停着的，用户在显示器页选完列表看着像没生效
+        db::set_setting(&conn, "playlist_rotation_paused", "false")
+            .map_err(|e| e.to_string())?;
     }
+    // 托盘 / 本地库轮播条 / 显示器页都监听这个键，广播让状态一起翻到「轮播中」
+    crate::notify_setting_changed(&app, "playlist_rotation_paused", "false");
     clock_reset(&display_id);
     let first = p.item_ids[0].clone();
     apply_item_inner(&app, &first, Some(display_id.clone()))?;
@@ -4471,7 +4477,11 @@ pub fn playlist_apply(app: AppHandle, id: i64) -> Result<serde_json::Value, Stri
         )?;
         db::set_setting(&conn, "playlist_index", "0")?;
         save_ctx(&conn, &fresh_ctx(CTX_UNIFIED, playlist.clone(), 0))?;
+        // 启用 = 要它跑起来：清掉轮播暂停（暂停过的状态下启用会「看着没生效」）
+        db::set_setting(&conn, "playlist_rotation_paused", "false")
+            .map_err(|e| e.to_string())?;
     }
+    crate::notify_setting_changed(&app, "playlist_rotation_paused", "false");
     // 应用第一项（失败不回滚激活态：条目在，只是当前应用失败，可下一张重试）
     let first = playlist.item_ids[0].clone();
     apply_item(app.clone(), first, None)?;
