@@ -490,7 +490,7 @@ async function bootstrapShareMount(cfg: WallpaperConfig): Promise<void> {
   window.addEventListener("resize", () => {
     shareApplyOrient(shareOrientEffective());
   });
-  sharePetShow(cfg, orient);
+  shareHudShow(cfg, orient);
   mount(cfg);
   shareSubscribeProps(audioToken);
 }
@@ -552,48 +552,32 @@ function shareRevealFx(): string {
   return shareOrientEffective() === "portrait" ? "fade" : fx;
 }
 
-const SHARE_PET_KEY = "wpem.share.pet";
-/** 手机上宠物与按钮都要更大（用户实测：小屏差点看不到） */
-const PET_SIZE = window.innerWidth < 560 ? 78 : 60;
-const HUD_BTN = window.innerWidth < 560 ? 48 : 40;
+const SHARE_HUD_POS_KEY = "wpem.share.pet"; // 键名沿用宠物时代，换把手也认老访客存的位置
 
-function petMascotSvg(): string {
-  // 兔子音符伙伴：长耳 + 腮红 + ω 嘴，配色跟加载层一致
-  return `<svg viewBox="0 0 64 64" width="${PET_SIZE}" height="${PET_SIZE}" aria-hidden="true">
-    <defs>
-      <radialGradient id="petg" cx="35%" cy="26%" r="85%">
-        <stop offset="0" stop-color="#8ff0fb"/><stop offset=".55" stop-color="#8b9cf9"/><stop offset="1" stop-color="#5b5bd6"/>
-      </radialGradient>
-    </defs>
-    <g class="pet-bob">
-      <ellipse cx="32" cy="57" rx="14" ry="3.2" fill="rgba(0,0,0,.35)"/>
-      <g class="pet-ear ear-l">
-        <rect x="20" y="2" width="9" height="22" rx="4.5" fill="url(#petg)"/>
-        <rect x="22.4" y="6" width="4.2" height="14" rx="2.1" fill="#f9a8d4" opacity=".85"/>
-      </g>
-      <g class="pet-ear ear-r">
-        <rect x="35" y="2" width="9" height="22" rx="4.5" fill="url(#petg)"/>
-        <rect x="37.4" y="6" width="4.2" height="14" rx="2.1" fill="#f9a8d4" opacity=".85"/>
-      </g>
-      <circle cx="32" cy="42" r="20" fill="url(#petg)"/>
-      <g class="pet-eye">
-        <ellipse cx="24.6" cy="40" rx="3.8" ry="4.8" fill="#0b1020"/>
-        <circle cx="25.9" cy="38.4" r="1.4" fill="#fff"/>
-      </g>
-      <g class="pet-eye">
-        <ellipse cx="39.4" cy="40" rx="3.8" ry="4.8" fill="#0b1020"/>
-        <circle cx="40.7" cy="38.4" r="1.4" fill="#fff"/>
-      </g>
-      <ellipse cx="19.4" cy="46.5" rx="3.6" ry="2.1" fill="#f9a8d4" opacity=".6"/>
-      <ellipse cx="44.6" cy="46.5" rx="3.6" ry="2.1" fill="#f9a8d4" opacity=".6"/>
-      <path d="M29.5 48c1 1.5 2 1.5 3 0M32.5 48c1 1.5 2 1.5 3 0" stroke="#0b1020" stroke-width="1.6" fill="none" stroke-linecap="round"/>
-    </g>
-    <g class="pet-note"><text x="47" y="13" font-size="13" fill="#f9a8d4">♪</text></g>
-  </svg>`;
+/**
+ * HUD 尺寸：读「当前屏幕分辨率」自适应，取短边（旋转不换档）。
+ * 不用视口宽度 —— 窗口能任意拉窄、横竖屏会互换，屏幕短边才是「设备实际多大」的
+ * 稳定信号；档位钳死，避免超高分辨率下过大、小屏上够不着。
+ */
+function shareHudMetrics(): { handle: number; btn: number; glyph: number } {
+  const short =
+    Math.min(window.screen?.width ?? 0, window.screen?.height ?? 0) ||
+    Math.min(window.innerWidth, window.innerHeight);
+  if (short < 480) return { handle: 46, btn: 48, glyph: 22 }; // 手机
+  if (short < 900) return { handle: 40, btn: 42, glyph: 19 }; // 平板 / 小笔记本
+  if (short < 1440) return { handle: 34, btn: 38, glyph: 16 }; // 常规桌面
+  return { handle: 30, btn: 34, glyph: 14 }; // 高分大屏
 }
 
+/** 收起态箭头朝下；展开态由 CSS 翻 180° 朝上（同一颗钮，方向即状态） */
+function hudArrowSvg(): string {
+  return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1"
+    stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 9.5 12 16l7-6.5"/></svg>`;
+}
+
+/** 图标不带固定宽高，尺寸交给 CSS 变量：换档只改变量，不重建节点、不打断动画 */
 function hudIcon(paths: string): string {
-  return `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${paths}</svg>`;
+  return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${paths}</svg>`;
 }
 
 const SHARE_ICONS = {
@@ -613,7 +597,7 @@ const SHARE_ICONS = {
 };
 
 let shareHud: {
-  pet: HTMLDivElement;
+  handle: HTMLDivElement;
   menu: HTMLDivElement;
   orientBtn: HTMLButtonElement;
   muteBtn: HTMLButtonElement;
@@ -623,99 +607,122 @@ let shareHud: {
 } | null = null;
 
 /**
- * 分享访客 HUD：可拖动的边缘吸附小宠物，点击呼出操作列（画幅/全屏/静音/作者属性/重载）。
+ * 分享访客 HUD：边缘吸附的玻璃圆钮 + 向下小箭头，点击展开/收起操作列
+ * （画幅/全屏/静音/作者属性/重载）；展开后箭头翻上，菜单列在钮的一侧。
+ * - 尺寸自适应：按当前屏幕分辨率取档（shareHudMetrics），换屏/旋转自动换档。
  * - 拖动：window 级 pointer 监听（触屏可靠）+ 6px 阈值区分点击；松手吸附较近左右边缘
  *   并记忆位置；默认右上角。
- * - 尺寸自适应：小屏（手机）宠物与按钮都放大。
  * - 「作者属性」打开属性表单（访客本地热更，不回写宿主）。
  */
-function sharePetShow(cfg: WallpaperConfig, orient: ShareOrient): void {
+function shareHudShow(cfg: WallpaperConfig, orient: ShareOrient): void {
   if (shareHud) return;
-  const pet = document.createElement("div");
-  pet.id = "share-pet";
+  let metrics = shareHudMetrics();
+  const applyMetrics = () => {
+    const st = document.documentElement.style;
+    st.setProperty("--hud-handle", `${metrics.handle}px`);
+    st.setProperty("--hud-btn", `${metrics.btn}px`);
+    st.setProperty("--hud-glyph", `${metrics.glyph}px`);
+    st.setProperty("--hud-icon", `${Math.round(metrics.btn * 0.45)}px`);
+  };
+  applyMetrics();
+  const handle = document.createElement("div");
+  handle.id = "share-hud-handle";
+  handle.setAttribute("role", "button");
+  handle.tabIndex = 0;
+  // 箭头必须挂在钮里面：看得见的、点得到的、拖得动的得是同一个东西
+  //（旧版吉祥物画在菜单模板里，跟隐形的拖拽方块错位，是这次换把手的由来）
+  handle.innerHTML = `<span class="hud-chev">${hudArrowSvg()}</span>`;
   const menu = document.createElement("div");
-  menu.id = "share-pet-menu";
+  menu.id = "share-hud-menu";
   menu.innerHTML = `
   <style>
-    #share-pet { position:fixed; z-index:11; width:${PET_SIZE}px; height:${PET_SIZE}px;
-      cursor:grab; touch-action:none; user-select:none; -webkit-user-select:none;
-      filter:drop-shadow(0 5px 12px rgba(0,0,0,.5));
-      transition:left .28s cubic-bezier(.2,.9,.25,1.25), top .28s cubic-bezier(.2,.9,.25,1.25), transform .2s ease; }
-    #share-pet.dragging { transition:none; cursor:grabbing; transform:scale(1.12) rotate(-4deg); }
-    #share-pet.dragging .pet-eye { transform:scaleY(.55); }
-    #share-pet.open { transform:scale(1.06); }
-    #share-pet .pet-eye { transform-box:fill-box; transform-origin:center;
-      animation:petblink 4.2s ease-in-out infinite; }
-    @keyframes petblink { 0%,93%,100% { transform:scaleY(1) } 96% { transform:scaleY(.08) } }
-    #share-pet .pet-bob { animation:petbob 3s ease-in-out infinite; transform-box:fill-box; }
-    @keyframes petbob { 50% { transform:translateY(-3px) } }
-    #share-pet .pet-note { transform-box:fill-box; animation:petnote 2.4s ease-in-out infinite; }
-    @keyframes petnote { 0%,100% { transform:translate(0,0); opacity:.5 } 50% { transform:translate(-3px,-6px); opacity:1 } }
-    #share-pet.open .ear-l { transform-box:fill-box; transform-origin:bottom center; animation:earwig 1s ease-in-out infinite; }
-    #share-pet.open .ear-r { transform-box:fill-box; transform-origin:bottom center; animation:earwig 1s ease-in-out .15s infinite reverse; }
-    @keyframes earwig { 0%,100% { transform:rotate(0) } 50% { transform:rotate(7deg) } }
-    #share-pet-menu { position:fixed; z-index:11; display:flex; flex-direction:column; gap:10px; }
-    #share-pet-menu button { width:${HUD_BTN}px; height:${HUD_BTN}px; border-radius:999px; display:grid; place-items:center;
+    #share-hud-handle { position:fixed; z-index:11; display:grid; place-items:center; outline:none; box-sizing:border-box;
+      width:var(--hud-handle); height:var(--hud-handle); border-radius:999px; color:#e6edf3;
+      background:rgba(16,20,31,.82); border:1px solid rgba(255,255,255,.16); box-shadow:0 6px 18px rgba(0,0,0,.45);
+      backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px);
+      cursor:grab; touch-action:none; user-select:none; -webkit-user-select:none; -webkit-tap-highlight-color:transparent;
+      transition:left .28s cubic-bezier(.2,.9,.25,1.25), top .28s cubic-bezier(.2,.9,.25,1.25), transform .2s ease, background .15s ease; }
+    #share-hud-handle:hover { background:rgba(40,48,66,.9); }
+    #share-hud-handle:focus-visible { border-color:rgba(140,170,255,.85); }
+    #share-hud-handle.dragging { transition:none; cursor:grabbing; transform:scale(1.08); }
+    #share-hud-handle.open { transform:scale(1.04); }
+    #share-hud-handle .hud-chev { display:grid; place-items:center; transition:transform .26s cubic-bezier(.2,.9,.25,1.25); }
+    #share-hud-handle .hud-chev svg { width:var(--hud-glyph); height:var(--hud-glyph); display:block;
+      animation:hudnudge 2.8s ease-in-out infinite; }
+    @keyframes hudnudge { 0%,70%,100% { transform:translateY(0) } 82% { transform:translateY(2.5px) } }
+    #share-hud-handle.open .hud-chev { transform:rotate(180deg); }
+    #share-hud-handle.open .hud-chev svg { animation:none; }
+    #share-hud-menu { position:fixed; z-index:11; display:flex; flex-direction:column; gap:10px; }
+    #share-hud-menu button { width:var(--hud-btn); height:var(--hud-btn); border-radius:999px; display:grid; place-items:center; box-sizing:border-box;
       background:rgba(16,20,31,.78); border:1px solid rgba(255,255,255,.14); color:#e6edf3;
-      cursor:pointer; backdrop-filter:blur(6px); transition:background .15s ease, opacity .18s ease, transform .18s ease; }
-    #share-pet-menu button:hover { background:rgba(40,48,66,.9); }
-    #share-pet-menu.collapsed button { opacity:0; pointer-events:none; transform:scale(.6) translateY(6px); }
+      cursor:pointer; backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px);
+      transition:background .15s ease, opacity .18s ease, transform .18s ease; }
+    #share-hud-menu button svg { width:var(--hud-icon); height:var(--hud-icon); display:block; }
+    #share-hud-menu button:hover { background:rgba(40,48,66,.9); }
+    #share-hud-menu.collapsed button { opacity:0; pointer-events:none; transform:scale(.6) translateY(6px); }
   </style>
-  ${petMascotSvg()}
   <button id="hud-orient" title=""></button>
   <button id="hud-fs" title="全屏 Fullscreen"></button>
   <button id="hud-mute" title="声音 Sound"></button>
   <button id="hud-props" title="作者属性 Properties">${hudIcon(SHARE_ICONS.props)}</button>
   <button id="hud-reload" title="重载 Reload">${hudIcon(SHARE_ICONS.reload)}</button>`;
-  document.body.append(menu, pet);
+  document.body.append(menu, handle);
   const orientBtn = menu.querySelector("#hud-orient") as HTMLButtonElement;
   const fsBtn = menu.querySelector("#hud-fs") as HTMLButtonElement;
   const muteBtn = menu.querySelector("#hud-mute") as HTMLButtonElement;
-  shareHud = { pet, menu, orientBtn, muteBtn, orient, muted: cfg.muted !== false, expanded: false };
+  shareHud = { handle, menu, orientBtn, muteBtn, orient, muted: cfg.muted !== false, expanded: false };
 
   // ---- 摆位：默认右上角；记忆位置 → 钳回视口 → 吸附较近边缘 ----
   const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
   const place = (x: number, y: number) => {
-    pet.style.left = `${clamp(Math.round(x), 10, window.innerWidth - PET_SIZE - 10)}px`;
-    pet.style.top = `${clamp(Math.round(y), 10, window.innerHeight - PET_SIZE - 10)}px`;
+    handle.style.left = `${clamp(Math.round(x), 10, window.innerWidth - metrics.handle - 10)}px`;
+    handle.style.top = `${clamp(Math.round(y), 10, window.innerHeight - metrics.handle - 10)}px`;
   };
   const saved = (() => {
     try {
-      const p = JSON.parse(localStorage.getItem(SHARE_PET_KEY) || "null") as { x: number; y: number } | null;
+      const p = JSON.parse(localStorage.getItem(SHARE_HUD_POS_KEY) || "null") as { x: number; y: number } | null;
       if (p && Number.isFinite(p.x) && Number.isFinite(p.y)) return p;
     } catch { /* 忽略坏数据 */ }
     return null;
   })();
   if (saved) place(saved.x, saved.y);
-  else place(window.innerWidth - PET_SIZE - 14, 16);
+  else place(window.innerWidth - metrics.handle - 14, 16);
   const snapToEdge = () => {
-    const x = parseFloat(pet.style.left) || 0;
-    const y = parseFloat(pet.style.top) || 0;
-    const edgeX = x + PET_SIZE / 2 < window.innerWidth / 2 ? 10 : window.innerWidth - PET_SIZE - 10;
+    const x = parseFloat(handle.style.left) || 0;
+    const y = parseFloat(handle.style.top) || 0;
+    const edgeX = x + metrics.handle / 2 < window.innerWidth / 2 ? 10 : window.innerWidth - metrics.handle - 10;
     place(edgeX, y);
   };
   const layoutMenu = () => {
-    const px = parseFloat(pet.style.left) || 0;
-    const py = parseFloat(pet.style.top) || 0;
-    const onRight = px + PET_SIZE / 2 >= window.innerWidth / 2;
-    const mx = onRight ? px - HUD_BTN - 12 : px + PET_SIZE + 12;
-    const mh = menu.querySelectorAll("button").length * (HUD_BTN + 10);
+    const px = parseFloat(handle.style.left) || 0;
+    const py = parseFloat(handle.style.top) || 0;
+    const onRight = px + metrics.handle / 2 >= window.innerWidth / 2;
+    const mx = onRight ? px - metrics.btn - 12 : px + metrics.handle + 12;
+    const mh = menu.querySelectorAll("button").length * (metrics.btn + 10);
     const my = clamp(py, 10, window.innerHeight - mh - 10);
     menu.style.left = `${Math.round(mx)}px`;
     menu.style.top = `${Math.round(my)}px`;
   };
 
-  // ---- 展开/收起 ----
+  // ---- 展开/收起：点箭头（触屏/鼠标），键盘 Enter·Space 同样可用 ----
   const setExpanded = (open: boolean) => {
     if (!shareHud) return;
     shareHud.expanded = open;
     menu.classList.toggle("collapsed", !open);
-    pet.classList.toggle("open", open);
+    handle.classList.toggle("open", open);
+    handle.setAttribute("aria-expanded", open ? "true" : "false");
+    handle.setAttribute("aria-label", open ? "收起菜单 · Collapse menu" : "展开菜单 · Expand menu");
+    handle.title = open ? "收起菜单 · Collapse menu" : "展开菜单 · Expand menu";
     if (open) layoutMenu();
   };
   document.addEventListener("pointerdown", (ev) => {
     const target = ev.target as Node;
-    if (shareHud?.expanded && !pet.contains(target) && !menu.contains(target)) setExpanded(false);
+    if (shareHud?.expanded && !handle.contains(target) && !menu.contains(target)) setExpanded(false);
+  });
+  handle.addEventListener("keydown", (ev) => {
+    if (ev.key !== "Enter" && ev.key !== " ") return;
+    ev.preventDefault();
+    setExpanded(!shareHud?.expanded);
   });
 
   // ---- 拖动：window 级监听（触屏可靠），6px 阈值区分点击 ----
@@ -727,39 +734,44 @@ function sharePetShow(cfg: WallpaperConfig, orient: ShareOrient): void {
     if (!drag.moved && Math.hypot(dx, dy) > 6) {
       drag.moved = true;
       setExpanded(false);
-      pet.classList.add("dragging");
+      handle.classList.add("dragging");
     }
     if (drag.moved) {
       ev.preventDefault();
-      pet.style.left = `${clamp(drag.ox + dx, 10, window.innerWidth - PET_SIZE - 10)}px`;
-      pet.style.top = `${clamp(drag.oy + dy, 10, window.innerHeight - PET_SIZE - 10)}px`;
+      handle.style.left = `${clamp(drag.ox + dx, 10, window.innerWidth - metrics.handle - 10)}px`;
+      handle.style.top = `${clamp(drag.oy + dy, 10, window.innerHeight - metrics.handle - 10)}px`;
     }
   };
   const onUp = () => {
     if (!drag) return;
     const wasDrag = drag.moved;
     drag = null;
-    pet.classList.remove("dragging");
+    handle.classList.remove("dragging");
     if (wasDrag) {
       snapToEdge();
       try {
-        localStorage.setItem(SHARE_PET_KEY, JSON.stringify({ x: parseFloat(pet.style.left), y: parseFloat(pet.style.top) }));
+        localStorage.setItem(SHARE_HUD_POS_KEY, JSON.stringify({ x: parseFloat(handle.style.left), y: parseFloat(handle.style.top) }));
       } catch { /* 存不了就本次会话有效 */ }
       if (shareHud?.expanded) layoutMenu();
     } else {
       setExpanded(!shareHud?.expanded);
     }
   };
-  pet.addEventListener("pointerdown", (ev) => {
+  handle.addEventListener("pointerdown", (ev) => {
     if (ev.button !== 0 && ev.pointerType === "mouse") return;
     ev.preventDefault();
-    drag = { sx: ev.clientX, sy: ev.clientY, ox: parseFloat(pet.style.left) || 0, oy: parseFloat(pet.style.top) || 0, moved: false };
+    drag = { sx: ev.clientX, sy: ev.clientY, ox: parseFloat(handle.style.left) || 0, oy: parseFloat(handle.style.top) || 0, moved: false };
   });
   window.addEventListener("pointermove", onMove, { passive: false });
   window.addEventListener("pointerup", onUp);
   window.addEventListener("pointercancel", onUp);
 
   window.addEventListener("resize", () => {
+    const next = shareHudMetrics();
+    if (next.handle !== metrics.handle || next.btn !== metrics.btn) {
+      metrics = next;
+      applyMetrics();
+    }
     snapToEdge();
     if (shareHud?.expanded) layoutMenu();
   });
