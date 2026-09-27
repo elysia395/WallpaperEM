@@ -1731,6 +1731,11 @@ function mountViaLib(cfg: WallpaperConfig) {
         properties,
         onDiagnostic: (msg: string, level: string) => reportDiag(cfg, `[${level}] ${msg}`),
         onError: (err: Error) => reportDiag(cfg, `mount error: ${err.message}`),
+        // 首帧监听（库在「画面刚画完」时回调）：这里只**调度**，重活一律交给
+        // finishFirstFrame 在任务之外做 —— 见那里的注释（就地干活会占住首帧
+        // 提交那一次任务）。挂载 promise 在同一时刻 resolve，state.inst 会在
+        // 微任务里先落好，帧外执行时拿得到。
+        onReady: () => finishFirstFrame(cfg, seq),
       };
       if (systemAudio.alive) mountOpts.audio = systemAudio;
       if (systemMedia.subscribed) mountOpts.media = systemMedia;
@@ -1772,15 +1777,9 @@ function mountViaLib(cfg: WallpaperConfig) {
       state.inst = inst;
       // 库首帧后恒为播放态；若当前处于全局暂停（睡眠/用户暂停）需补上
       if (state.paused) inst.pause();
-      // 壁纸已完全加载（mount 等到首帧才返回）：此刻起音量。
-      // 放在 pause() 之后 —— setVolume 的取消静音路径不该把暂停中的壁纸播响
-      applyWallpaperVolume(inst);
-      // SSE 常在 mount 之后才首次收到帧；库的音频泵逐帧选源，此时补装也生效。
-      // 每次挂载都要重来一遍 —— 切壁纸会换新实例，旧实例上的音频源不会继承
-      attachSystemAudio(inst, seq);
-      attachSystemMedia(inst, seq);
-      reportDiag(cfg, "ready");
-      reveal();
+      // 余下的收尾（起音量 / 装音频源 / 上报 ready / 显形）不在这一帧里做：
+      // 由首帧监听 onReady 调度、延到帧外执行（见 finishFirstFrame）。
+      // 这里只落 state.inst —— 挂载期到达的热更新/pause 调用要能立刻拿到实例。
     } catch (e) {
       if (seq !== state.seq) return;
       const msg = String((e as Error)?.message || e).slice(0, 200);
@@ -1789,6 +1788,41 @@ function mountViaLib(cfg: WallpaperConfig) {
       mountDefaultWallpaper();
     }
   })();
+}
+
+/**
+ * 首帧收尾：起音量 → 装音频源 → 上报 ready → 显形。
+ *
+ * 由**库的首帧监听**（mountOpts.onReady，见 mountViaLib）调度，并且必须延到当前
+ * 任务之外再跑：库的首帧钩子是在「画面刚画完」那一刻被调起的 —— scene 在渲染循环
+ * rAF 回调里的 `render().then`，web 在 iframe load 回调，video/gif/image 在解码出
+ * 首帧的事件回调（库内 armFirstFrame / signalFirstFrame）。就地做样式/动画/DOM/
+ * 音量的事会把**这一次任务**拖长，正好压在首帧提交上 —— 那是渲染线程最不该被占住
+ * 的时刻。`requestAnimationFrame` + `setTimeout(0)` 两步保证回调已返回、帧已提交，
+ * 浏览器先出帧，我们再干活。
+ *
+ * `seq` = 发起挂载时的装载序号：期间切了别的壁纸 / 走了降级页（clear() 会推进
+ * seq）就整块丢弃，别把过期壁纸的收尾补到新页面上。
+ */
+function finishFirstFrame(cfg: WallpaperConfig, seq: number) {
+  const run = () => {
+    window.setTimeout(() => {
+      if (seq !== state.seq) return;
+      const inst = state.inst;
+      if (!inst) return;
+      // 首帧已上屏：此刻起音量（暂停态在挂载续体里已先落好 ——
+      // setVolume 的取消静音路径不该把暂停中的壁纸播响）
+      applyWallpaperVolume(inst);
+      // SSE 常在首帧之后才收到帧；库的音频泵逐帧选源，此时补装也生效。
+      // 每次挂载都要重来一遍 —— 切壁纸会换新实例，旧实例上的音频源不会继承
+      attachSystemAudio(inst, seq);
+      attachSystemMedia(inst, seq);
+      reportDiag(cfg, "ready");
+      reveal();
+    }, 0);
+  };
+  if (typeof window.requestAnimationFrame === "function") window.requestAnimationFrame(run);
+  else run();
 }
 
 // ---------- canvas 演示动画（非工坊类型，本文件自绘） ----------

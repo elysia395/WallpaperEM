@@ -137,19 +137,23 @@ fn spawn_snapshot_sync(app: &AppHandle, cfg_type: &str, item_id: &str, dir: &Pat
         // 等「新一次」ready：t0 之前的时间戳属于上一张壁纸。
         // 还要等换纸整体落地 —— 新的 ready 可能早于换纸任务收尾（现役窗还没
         // 交出控制权），光看时间戳会抢拍。
+        // **事件驱动**：先订阅再查状态，渲染器报 ready / 换纸落地都会立刻唤醒
+        // （见 content_server::EngineEvents）；睡觉只在等超时。
         let t0 = ready_ms.load(Ordering::Relaxed);
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        let mut events = crate::content_server::subscribe_engine(&app2);
         loop {
             if ready_ms.load(Ordering::Relaxed) > t0
                 && !crate::wallpaper::any_swap_in_flight()
             {
                 break;
             }
-            if std::time::Instant::now() >= deadline {
+            let now = std::time::Instant::now();
+            if now >= deadline {
                 tracing::warn!("system wallpaper: 等渲染 ready 超时，跳过 {ty} 截图");
                 return;
             }
-            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+            events.wait(deadline.saturating_duration_since(now)).await;
         }
         // ready 时首帧刚上屏；再等一拍让场景多渲染几帧，避免截到半成品画面
         tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
@@ -790,6 +794,8 @@ pub async fn capture_wallpaper_png(
     let deadline = std::time::Instant::now() + std::time::Duration::from_millis(limit);
     // 窗口在等待期间**反复探测**而不是开头探一次：应用新壁纸时会先建窗再挂载，
     // 建窗本身要几十到几百毫秒；开头探一次会在建窗完成前就报「没有壁纸窗口」。
+    // **事件驱动**：订阅引擎事件，渲染器报 ready / 换纸落地即醒；睡觉只为超时。
+    let mut events = crate::content_server::subscribe_engine(app);
     let mut label: Option<String> = None;
     loop {
         if label.is_none() {
@@ -801,7 +807,8 @@ pub async fn capture_wallpaper_png(
         {
             break;
         }
-        if std::time::Instant::now() >= deadline {
+        let now = std::time::Instant::now();
+        if now >= deadline {
             // 超时原因必须可读：渲染器自报过失败就直接引用，否则给最近一条诊断
             // （常见是停在 "mount start"，说明大 scene.pkg 还在解析，重试或加大
             // timeoutMs 即可，而不是「壁纸页加载失败」）
@@ -813,7 +820,7 @@ pub async fn capture_wallpaper_png(
                 None => format!("等待渲染器就绪超时（{limit}ms）：未找到正在显示的壁纸窗口。{hint}"),
             });
         }
-        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        events.wait(deadline.saturating_duration_since(now)).await;
     }
     let Some(label) = label.or_else(|| pick_wallpaper_window(app)) else {
         return Err("当前没有正在显示的壁纸窗口".into());

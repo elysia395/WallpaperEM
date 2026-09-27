@@ -46,6 +46,69 @@ pub struct ContentServerState {
     /// label 分开记（渲染器建窗时经 query 拿到自己的 label，见 renderer 的
     /// WIN_LABEL）。
     pub label_diag: Arc<Mutex<HashMap<String, LabelDiag>>>,
+    /// 引擎事件的广播通道：**推送**首帧就绪 / 加载失败 / 换纸落地。
+    ///
+    /// 等待方（换纸任务、系统壁纸抽帧、MCP 截图）先 [`subscribe_engine`] 再查状态，
+    /// 事件到即醒 —— 不再按几十毫秒一轮去轮询共享状态（省掉固定延迟，也不反复抢锁）。
+    /// 没有订阅者时 `send` 静默失败：事件只是「可能有变化」的提示，
+    /// 判据永远是可查的状态，不依赖事件本身携带数据。
+    pub engine_events: tokio::sync::broadcast::Sender<EngineEvent>,
+}
+
+/// 引擎事件（见 [`ContentServerState::engine_events`]）
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum EngineEvent {
+    /// 某扇壁纸窗的渲染器报了首帧就绪（`…] ready`）
+    Ready { label: String },
+    /// 某扇壁纸窗的渲染器报了加载失败（`…] failed: …`）
+    Failed { label: String },
+    /// 某块屏的换纸任务落地（单飞集合腾空）——「画面真的换完了」
+    SwapSettled,
+}
+
+/// 发一条引擎事件（无订阅者时静默丢弃，见 [`ContentServerState::engine_events`]）
+pub fn emit_engine_event(app: &tauri::AppHandle, ev: EngineEvent) {
+    if let Some(st) = app.try_state::<ContentServerState>() {
+        let _ = st.engine_events.send(ev);
+    }
+}
+
+/// 引擎事件订阅句柄：[`EngineEvents::wait`] 一睡到「可能有变化」。
+///
+/// 拿不到内容服务器状态（启动早期/测试）时退化为有界小步长轮询 ——
+/// 事件通道是主路径，轮询只是「别把等待方卡死」的保险。
+pub struct EngineEvents(Option<tokio::sync::broadcast::Receiver<EngineEvent>>);
+
+/// 订阅引擎事件。调用方**必须先订阅再查状态**：查完到睡下之间发生的事件不会丢，
+/// 否则「查的时候还没就绪、刚睡下就绪事件就发完了」要一路等到超时。
+pub fn subscribe_engine(app: &tauri::AppHandle) -> EngineEvents {
+    EngineEvents(
+        app.try_state::<ContentServerState>()
+            .map(|s| s.engine_events.subscribe()),
+    )
+}
+
+impl EngineEvents {
+    /// 睡到「可能有变化」：来一条事件立刻返回；到 `limit` 也返回（调用方按自己的
+    /// deadline 判定）。事件丢档（`Lagged`）同样按「有变化」处理 —— 醒来复查状态即可，
+    /// 事件本身不携带判据，丢几条不影响正确性。
+    pub async fn wait(&mut self, limit: std::time::Duration) {
+        use tokio::sync::broadcast::error::RecvError;
+        /// 通道不可用/已关闭时的兜底节拍（有界轮询，只为不把等待方卡死）
+        const FALLBACK: std::time::Duration = std::time::Duration::from_millis(50);
+        match self.0.as_mut() {
+            Some(rx) => match tokio::time::timeout(limit, rx.recv()).await {
+                Ok(Ok(_)) | Ok(Err(RecvError::Lagged(_))) => {}
+                Ok(Err(RecvError::Closed)) => {
+                    self.0 = None;
+                    tokio::time::sleep(limit.min(FALLBACK)).await;
+                }
+                // 时限内没事件：回调用方按 deadline 判定
+                Err(_) => {}
+            },
+            None => tokio::time::sleep(limit.min(FALLBACK)).await,
+        }
+    }
 }
 
 /// 渲染器最近一次诊断的汇总快照（`/diag` 每次上报都会更新）
@@ -128,9 +191,11 @@ fn now_epoch_ms() -> u64 {
 ///
 /// `win` = 上报窗口的 label（渲染器 query 的 `win` 键）：非空时同步记进
 /// [`ContentServerState::label_diag`] 分档，换纸按自己的 label 等 ready/failure。
+/// ready / failed 同时**广播**一条引擎事件，让等待方立刻醒来（不再轮询）。
 fn record_renderer_diag(state: &ContentServerState, msg: &str, win: Option<&str>) {
     let now_ms = now_epoch_ms;
     let is_ready = msg.ends_with("] ready");
+    let fail_reason = msg.split_once("] failed: ").map(|(_, r)| r);
     if is_ready {
         state
             .wallpaper_ready_ms
@@ -143,7 +208,7 @@ fn record_renderer_diag(state: &ContentServerState, msg: &str, win: Option<&str>
                 d.ready_item = id;
             }
         }
-        if let Some((_, reason)) = msg.split_once("] failed: ") {
+        if let Some(reason) = fail_reason {
             d.fail_reason = reason.to_string();
             d.fail_ms = now_ms();
             d.fail_item = diag_item_id(msg).unwrap_or_default();
@@ -159,11 +224,26 @@ fn record_renderer_diag(state: &ContentServerState, msg: &str, win: Option<&str>
                     d.ready_item = id;
                 }
             }
-            if let Some((_, reason)) = msg.split_once("] failed: ") {
+            if let Some(reason) = fail_reason {
                 d.fail_reason = reason.to_string();
                 d.fail_ms = now_ms();
                 d.fail_item = diag_item_id(msg).unwrap_or_default();
             }
+        }
+        // 广播放在状态写完之后：订阅者醒来复查时读到的必定是这份新状态
+        let ev = if is_ready {
+            Some(EngineEvent::Ready {
+                label: win.to_string(),
+            })
+        } else if fail_reason.is_some() {
+            Some(EngineEvent::Failed {
+                label: win.to_string(),
+            })
+        } else {
+            None
+        };
+        if let Some(ev) = ev {
+            let _ = state.engine_events.send(ev);
         }
     }
 }
@@ -298,6 +378,7 @@ pub fn init(app: &AppHandle) -> Result<(), String> {
         wallpaper_ready_ms: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)),
         renderer_diag: Default::default(),
         label_diag: Default::default(),
+        engine_events: tokio::sync::broadcast::channel(64).0,
     };
     app.manage(state.clone());
 
@@ -1138,6 +1219,7 @@ mod tests {
             wallpaper_ready_ms: Default::default(),
             renderer_diag: Default::default(),
             label_diag: Default::default(),
+            engine_events: tokio::sync::broadcast::channel(64).0,
         };
 
         let items: Vec<String> = {
@@ -1258,6 +1340,7 @@ mod tests {
             wallpaper_ready_ms: Default::default(),
             renderer_diag: Default::default(),
             label_diag: Default::default(),
+            engine_events: tokio::sync::broadcast::channel(64).0,
         }
     }
 
@@ -1341,6 +1424,67 @@ mod tests {
         record_renderer_diag(&state, "[scene 111] failed: pkg 炸了", Some("wallpaper-a"));
         assert!(label_failure_since_state(&state, "wallpaper-a", t0, Some("111")).is_some());
         assert!(label_failure_since_state(&state, "wallpaper-b", t0, None).is_none());
+    }
+
+    /// 引擎事件：ready / failed 各自广播一条；其它诊断不打扰等待方。
+    /// 等待方「先订阅再查状态」——事件到即醒，不用轮询。
+    #[test]
+    fn engine_events_push_ready_and_failure() {
+        let state = diag_test_state();
+        let mut rx = state.engine_events.subscribe();
+
+        // 普通诊断（mount start / boot）不该发事件：等待方只关心「有结论」的两条
+        record_renderer_diag(&state, "[scene 111] mount start", Some("wallpaper-a"));
+        record_renderer_diag(&state, "[canvas] boot", Some("wallpaper-a"));
+        assert!(rx.try_recv().is_err(), "非 ready/failed 不该广播");
+
+        record_renderer_diag(&state, "[scene 111] ready", Some("wallpaper-a"));
+        assert_eq!(
+            rx.try_recv().ok(),
+            Some(EngineEvent::Ready {
+                label: "wallpaper-a".into()
+            })
+        );
+
+        record_renderer_diag(&state, "[scene 111] failed: pkg 炸了", Some("wallpaper-b"));
+        assert_eq!(
+            rx.try_recv().ok(),
+            Some(EngineEvent::Failed {
+                label: "wallpaper-b".into()
+            })
+        );
+
+        // 没带 win（无窗口归属的上报）只更新全局槽，不广播
+        record_renderer_diag(&state, "[scene 111] ready", None);
+        assert!(rx.try_recv().is_err());
+    }
+
+    /// `EngineEvents::wait` 来事件立刻返回；没事件就睡满时限（不空转）
+    #[tokio::test]
+    async fn engine_events_wait_wakes_on_event() {
+        let state = diag_test_state();
+        let mut events = EngineEvents(Some(state.engine_events.subscribe()));
+        // 先睡满一小段：没有事件时它就是「等这么久」
+        let t0 = std::time::Instant::now();
+        events.wait(std::time::Duration::from_millis(60)).await;
+        assert!(t0.elapsed() >= std::time::Duration::from_millis(50));
+
+        // 有事件时不等时限：发一条 ready，150ms 的时限内应当远远提前返回
+        let t1 = std::time::Instant::now();
+        let tx = state.engine_events.clone();
+        let waiter = tokio::spawn(async move {
+            events.wait(std::time::Duration::from_millis(150)).await;
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        let _ = tx.send(EngineEvent::Ready {
+            label: "wallpaper-a".into(),
+        });
+        waiter.await.unwrap();
+        let woke = t1.elapsed();
+        assert!(
+            woke < std::time::Duration::from_millis(140),
+            "事件到达就该醒（实测 {woke:?}）"
+        );
     }
 
     /// 随机文件端点的目录挑选逻辑：只挑普通文件、路径相对壁纸根、空目录 None
@@ -1528,6 +1672,7 @@ mod tests {
             wallpaper_ready_ms: Default::default(),
             renderer_diag: Default::default(),
             label_diag: Default::default(),
+            engine_events: tokio::sync::broadcast::channel(64).0,
         };
         let html =
             b"<!DOCTYPE html><html><head><meta charset=utf-8></head><body></body></html>".to_vec();

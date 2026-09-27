@@ -1634,6 +1634,13 @@ fn schedule_window_reload(app: &AppHandle, label: &str, frame: (f64, f64, f64, f
             if let Some(set) = RELOADING.get() {
                 set.lock().unwrap().remove(&label);
             }
+            // 换纸落地（成功/失败/被取代都算）：先腾空单飞集合再广播 ——
+            // 等「画面真的换完了」的截图与系统壁纸抽帧订这条事件醒来
+            // （见 content_server::EngineEvent::SwapSettled）。
+            crate::content_server::emit_engine_event(
+                &app,
+                crate::content_server::EngineEvent::SwapSettled,
+            );
         };
         let current = |app: &AppHandle| {
             app.try_state::<WallpaperEngineState>()
@@ -1720,7 +1727,8 @@ fn now_epoch_ms() -> u64 {
 ///
 /// 与旧「双窗无缝切换」的差别：没有第二扇窗口承载旧画面，换纸期间屏上露出
 /// 桌面（系统壁纸）—— 这是「一屏一进程、内存零累积」的代价。加载提速全部保留：
-/// 防抖 80ms、33ms 快轮询、首帧即显形（渲染器侧 0.25s 叠化，见 REVEAL_MS）。
+/// 防抖 80ms、**首帧就绪走推送**（渲染器一报 ready 立刻被唤醒，不轮询）、
+/// 首帧即显形（渲染器侧 0.25s 叠化，见 REVEAL_MS）。
 ///
 /// - 首帧/失败按**自己的 label** 记账（/diag 的 `win` 分档）：多屏并发时全局
 ///   单槽会互相覆盖；
@@ -1752,8 +1760,12 @@ async fn reload_wallpaper(
         return SwapOutcome::KeptOld(e);
     }
 
-    // 等首帧 / 失败 / 目标变更 / 释放 / 超时（先查后睡，33ms 快轮询）
+    // 等首帧 / 失败 / 目标变更 / 释放 / 超时。
+    // **事件驱动**：先订阅引擎事件再查状态，渲染器一报 ready/failed 立刻被唤醒；
+    // 定时只兜超时 —— 不再每 33ms 轮询共享状态（少掉最多一轮的固定延迟）。
+    let mut events = crate::content_server::subscribe_engine(app);
     let start = std::time::Instant::now();
+    let deadline = start + READY_TIMEOUT;
     let mut forced = false;
     loop {
         // 目标被取代（含 stop 清会话）→ 交回调用方；会话已清则把刚建的窗收掉
@@ -1784,7 +1796,8 @@ async fn reload_wallpaper(
         if crate::content_server::label_ready_since(app, base, since, item.as_deref()) {
             break;
         }
-        if start.elapsed() > READY_TIMEOUT {
+        let now = std::time::Instant::now();
+        if now >= deadline {
             tracing::warn!(
                 "wallpaper {base}: 等首帧超时（{}s），按现状收尾",
                 READY_TIMEOUT.as_secs()
@@ -1792,7 +1805,8 @@ async fn reload_wallpaper(
             forced = true;
             break;
         }
-        tokio::time::sleep(Duration::from_millis(33)).await;
+        // 睡到「有事件」或「到时限」：醒来复查上面那串判定
+        events.wait(deadline.saturating_duration_since(now)).await;
     }
     let wait_ms = start.elapsed().as_millis();
 
