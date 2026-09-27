@@ -82,7 +82,7 @@ pub fn definitions() -> Vec<Value> {
         }),
         json!({
             "name": "wallpaper_apply",
-            "description": "把本地库里的壁纸应用到桌面。缺省应用到所有显示器；传 displayId（见 displays_list）只应用到指定屏。",
+            "description": "把本地库里的壁纸应用到桌面。缺省应用到所有显示器；传 displayId（见 displays_list）只应用到指定屏。手动应用单张 = 退出轮播：先暂停轮播、再移除覆盖这些屏的轮播上下文（列表实体保留，可再 playlist_apply 启用）。",
             "inputSchema": obj(json!({
                 "itemId": { "type": "string" },
                 "displayId": { "type": "string", "description": "可选：只应用到该显示器 id（displays_list 返回）" },
@@ -168,7 +168,7 @@ pub fn definitions() -> Vec<Value> {
         }),
         json!({
             "name": "playlist_status",
-            "description": "轮播状态：当前列表/进度/间隔/是否暂停与下次切换时间（nextAtMs）。",
+            "description": "轮播状态：当前列表/进度/间隔/是否暂停与下次切换时间（nextAtMs）；switchable = 有没有可切换的轮播上下文（暂停不影响，上一张/下一张只要 switchable 为真就可用）。",
             "inputSchema": obj(json!({}), json!([])),
         }),
         json!({
@@ -178,14 +178,14 @@ pub fn definitions() -> Vec<Value> {
         }),
         json!({
             "name": "wallpaper_next",
-            "description": "切换列表：下一张（手动切换会重置轮播计时）。displayId 缺省按当前模式走（统一=全局；独立=各绑定屏各自前进），传值只切该屏。",
+            "description": "切换列表：下一张（手动切换会重置轮播计时；暂停轮播也照旧可用）。displayId 缺省按当前模式走（统一=全局；独立=各绑定屏各自前进），传值只切该屏。没有可切换的轮播上下文时报错。",
             "inputSchema": obj(json!({
                 "displayId": { "type": "string", "description": "可选：只切该显示器的轮播" },
             }), json!([])),
         }),
         json!({
             "name": "wallpaper_prev",
-            "description": "切换列表：上一张（随机模式沿洗牌队列回退）。displayId 语义同 wallpaper_next。",
+            "description": "切换列表：上一张（随机模式沿洗牌队列回退；暂停轮播也照旧可用）。displayId 语义同 wallpaper_next。",
             "inputSchema": obj(json!({
                 "displayId": { "type": "string", "description": "可选：只切该显示器的轮播" },
             }), json!([])),

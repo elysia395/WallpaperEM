@@ -503,7 +503,7 @@ impl TrayMenu {
         Ok(())
     }
 
-    /// 轮播状态 → 托盘文案。切换/激活/暂停后由 [`update_tray_rotation`] 调用。
+    /// 轮播状态 → 托盘文案与可用性。切换/激活/暂停后由 [`update_tray_rotation`] 调用。
     fn refresh_rotation(&self, app: &AppHandle) -> tauri::Result<()> {
         let st = wallpaper::playlist_status(app.clone())
             .unwrap_or_else(|_| serde_json::json!({ "active": false, "paused": false }));
@@ -519,6 +519,14 @@ impl TrayMenu {
         self.rot_status.set_text(status)?;
         self.rot_pause
             .set_text(i18n::tr(if paused { "恢复轮播" } else { "暂停轮播" }))?;
+        // 上一张/下一张：有轮播上下文才可用（暂停不影响 —— 暂停的只是定时自动切换；
+        // 手动设了单张壁纸 / 停止轮播后上下文没了，这两项跟着置灰）
+        let switchable = st
+            .get("switchable")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        self.rot_prev.set_enabled(switchable)?;
+        self.rot_next.set_enabled(switchable)?;
         Ok(())
     }
 
@@ -643,6 +651,7 @@ fn build_tray(app: &AppHandle) -> tauri::Result<TrayMenu> {
 
     // 轮播（自动切换）：当前项 / 上一张 / 下一张 / 暂停自动切换。
     // 「暂停轮播」只停定时切换（wallpaper::rotation_set），不动壁纸渲染（那是全局「暂停播放」）。
+    // 上一张/下一张的置灰由 refresh_rotation 按「有没有轮播上下文」定（暂停不算）。
     let rot_status =
         MenuItem::with_id(app, "rot_status", i18n::tr("轮播：未启用"), false, None::<&str>)?;
     let rot_prev = MenuItem::with_id(app, "rot_prev", i18n::tr("上一张"), true, None::<&str>)?;

@@ -4091,7 +4091,8 @@ fn apply_item_inner(
 
 /// 把本地库条目应用到桌面（用户显式点击；自动暂停态下立即恢复播放）。
 /// `display_id` 缺省 = 全部显示器；传值 = 只刷该屏（显示器管理 / 独立模式）。
-/// 手动应用 = 该屏回到固定单张：清掉对应轮播绑定（统一上下文不动）。
+/// 手动应用 = 该屏回到固定单张：先暂停轮播、再移除覆盖这些屏的轮播上下文
+/// （见 [`end_rotation_on_manual_apply`]）。
 #[tauri::command(async, rename = "wallpaper_apply_item")]
 pub fn apply_item(
     app: AppHandle,
@@ -4100,14 +4101,61 @@ pub fn apply_item(
 ) -> Result<(), String> {
     let res = apply_item_inner(&app, &item_id, display_id.clone());
     if res.is_ok() {
-        clear_display_bindings(&app, display_id.as_deref());
+        end_rotation_on_manual_apply(&app, display_id.as_deref());
         resume_if_auto_paused(&app, display_id.as_deref());
     }
     res
 }
 
-/// 清掉手动应用所影响的屏的轮播绑定：传值清单屏；缺省清全部屏（统一上下文不动，
-/// 全停用 [`playlist_stop`]）。
+/// 手动应用单张壁纸 = 退出轮播：先把轮播暂停状态落定，再移除这次应用覆盖到的屏的
+/// 轮播上下文 —— 否则定时器到点就把刚设的壁纸切走（用户报的正是这个现象）。
+///
+/// 作用域按「哪些上下文会覆盖被应用的屏」定：
+/// - 缺省（全部屏）：统一上下文 + 所有屏的绑定；
+/// - 指定屏：该屏的绑定，外加统一模式的统一上下文（统一模式一份上下文刷全部屏，
+///   留着它照样会把这张壁纸换掉）。独立模式下别的屏的绑定不动 —— 手动设一块屏的
+///   壁纸不该顺手停掉其它屏的轮播。
+///
+/// 清完之后一个上下文都不剩才把暂停标志置真（「轮播已停」）；还有别的屏在轮播时
+/// 保持原样。列表实体本身不删（仍在切换列表里，一键「启用轮播」可回来）。
+fn end_rotation_on_manual_apply(app: &AppHandle, display_id: Option<&str>) {
+    let Some(db) = app.try_state::<Arc<Mutex<rusqlite::Connection>>>() else {
+        return;
+    };
+    let Ok(conn) = db.lock() else {
+        return;
+    };
+    let mode = db::get_setting(&conn, "display_mode").unwrap_or_else(|| "unified".to_string());
+    let mut keys: Vec<String> = Vec::new();
+    if display_id.is_none() || mode != "independent" {
+        keys.push(CTX_UNIFIED.to_string());
+    }
+    match display_id {
+        Some(d) => keys.push(d.to_string()),
+        None => keys.extend(platform::active_screens().iter().map(|s| s.id.to_string())),
+    }
+    let mut cleared = false;
+    for key in &keys {
+        if read_ctx(&conn, key).is_some() {
+            clear_ctx(&conn, key);
+            clock_forget(key);
+            cleared = true;
+        }
+    }
+    if !cleared {
+        return; // 本来就没在轮播：暂停标志不动
+    }
+    let paused = !has_rotation_ctx(&conn);
+    let val = if paused { "true" } else { "false" };
+    let _ = db::set_setting(&conn, "playlist_rotation_paused", val);
+    drop(conn);
+    // 值没变也广播：本地库 / 显示器页靠这条信号刷新「列表还在不在轮播」
+    crate::notify_setting_changed(app, "playlist_rotation_paused", val);
+    crate::update_tray_rotation(app);
+}
+
+/// 清掉某屏（或全部屏）的轮播绑定，不动统一上下文、不动暂停标志。
+/// 激活统一列表时用：收回各屏的独立绑定，免得显示器页还挂着过期的轮播标记。
 fn clear_display_bindings(app: &AppHandle, display_id: Option<&str>) {
     let Some(db) = app.try_state::<Arc<Mutex<rusqlite::Connection>>>() else {
         return;
@@ -4512,7 +4560,7 @@ pub fn playlist_delete(app: AppHandle, id: i64) -> Result<bool, String> {
         conn.execute("DELETE FROM playlists WHERE id = ?1", [id])
             .map_err(|e| e.to_string())?;
         // 删的是当前激活列表：连轮播状态一起清，否则定时器拿着快照继续切
-        let was = db::get_setting(&conn, "active_playlist")
+        let mut was = db::get_setting(&conn, "active_playlist")
             .and_then(|raw| serde_json::from_str::<Playlist>(&raw).ok())
             .map(|ap| ap.id == id)
             .unwrap_or(false);
@@ -4523,12 +4571,15 @@ pub fn playlist_delete(app: AppHandle, id: i64) -> Result<bool, String> {
                 [],
             );
         }
-        // 绑定到屏的上下文也一并清（删除的列表不该在任何屏上继续轮播）
+        // 绑定到屏的上下文也一并清（删除的列表不该在任何屏上继续轮播）。
+        // 只绑在屏上（统一上下文没激活）时 was 是 false —— 那也得刷托盘：
+        // 上下文没了，上一张/下一张就该置灰
         for s in platform::active_screens() {
             let key = s.id.to_string();
             if read_ctx(&conn, &key).map(|c| c.playlist.id == id).unwrap_or(false) {
                 clear_ctx(&conn, &key);
                 clock_forget(&key);
+                was = true;
             }
         }
         was
@@ -4581,9 +4632,14 @@ pub fn playlist_apply(app: AppHandle, id: i64) -> Result<serde_json::Value, Stri
             .map_err(|e| e.to_string())?;
     }
     crate::notify_setting_changed(&app, "playlist_rotation_paused", "false");
-    // 应用第一项（失败不回滚激活态：条目在，只是当前应用失败，可下一张重试）
+    // 统一上下文接管全部屏：顺带收回各屏的独立绑定，免得显示器页还挂着过期的轮播标记
+    clear_display_bindings(&app, None);
+    // 应用第一项（失败不回滚激活态：条目在，只是当前应用失败，可下一张重试）。走
+    // apply_item_inner 而非命令入口 —— 命令入口是「手动设壁纸 = 退出轮播」，会把
+    // 刚写下的上下文立刻拆掉
     let first = playlist.item_ids[0].clone();
-    apply_item(app.clone(), first, None)?;
+    apply_item_inner(&app, &first, None)?;
+    resume_if_auto_paused(&app, None);
     clock_reset(CTX_UNIFIED);
     crate::update_tray_rotation(&app);
     tracing::info!(
@@ -4718,16 +4774,27 @@ pub fn playlist_stop(app: AppHandle) -> Result<(), String> {
 
 /// 轮播状态（切换列表页 / 显示器页 / 托盘共用）：
 /// 无激活列表时 `active: false`；倒计时以 nextAtMs 给出（暂停中为 null）。
+/// `switchable` = 有没有可切换的轮播上下文（与暂停无关），上一张/下一张的可用性
+/// 一律看它：暂停的是定时自动切换，手动切换照旧能走（见 [`has_rotation_ctx`]）。
 #[tauri::command(async, rename = "playlist_status")]
 pub fn playlist_status(app: AppHandle) -> Result<serde_json::Value, String> {
     let db = app.state::<Arc<Mutex<rusqlite::Connection>>>();
     let conn = db.lock().map_err(|e| e.to_string())?;
     let paused = rotation_paused(&conn);
+    let switchable = has_rotation_ctx(&conn);
     let Some(raw) = db::get_setting(&conn, "active_playlist") else {
-        return Ok(serde_json::json!({ "active": false, "paused": paused }));
+        return Ok(serde_json::json!({
+            "active": false,
+            "paused": paused,
+            "switchable": switchable,
+        }));
     };
     let Ok(p) = serde_json::from_str::<Playlist>(&raw) else {
-        return Ok(serde_json::json!({ "active": false, "paused": paused }));
+        return Ok(serde_json::json!({
+            "active": false,
+            "paused": paused,
+            "switchable": switchable,
+        }));
     };
     let index: i64 = db::get_setting(&conn, "playlist_index")
         .and_then(|s| s.parse().ok())
@@ -4743,6 +4810,7 @@ pub fn playlist_status(app: AppHandle) -> Result<serde_json::Value, String> {
     Ok(serde_json::json!({
         "active": true,
         "paused": paused,
+        "switchable": switchable,
         "mode": mode,
         "id": p.id,
         "name": p.name,
@@ -4819,6 +4887,16 @@ fn rotation_paused(conn: &Connection) -> bool {
         db::get_setting(conn, "playlist_rotation_paused").as_deref(),
         Some("true") | Some("1")
     )
+}
+
+/// 有没有可切换的轮播上下文：统一模式的激活列表 / 独立模式已绑定的屏。
+/// 「上一个/下一个」的可用性一律看它（托盘菜单项、快捷键、本地库轮播条）——
+/// 暂停只是停掉定时自动切换，手动切换照旧能走；真正没得切是上下文被移除之后
+/// （停止轮播、删列表、手动设了单张壁纸 → [`end_rotation_on_manual_apply`]）。
+fn has_rotation_ctx(conn: &Connection) -> bool {
+    active_ctx_keys(conn)
+        .iter()
+        .any(|k| read_ctx(conn, k).is_some())
 }
 
 /// 剪掉失效条目（本地文件已丢失等，配置解析失败）。返回剪掉数量。
@@ -5020,6 +5098,28 @@ mod tests {
         // 走穿队尾：重洗一轮，头一张不与上一张连续重复
         let fresh = step_ctx(&mut ctx, true);
         assert_ne!(fresh, cur, "跨轮不应与上一张连续重复");
+    }
+
+    /// 「有没有可切换的轮播上下文」：统一模式下只看统一上下文，且与暂停标志无关
+    /// —— 暂停只停定时切换，手动上一张/下一张照旧可用；上下文被移除后才真没得切
+    /// （托盘那两项的置灰、快捷键的忽略都看这个判据）。
+    #[test]
+    fn rotation_ctx_presence_ignores_pause() {
+        let c = play_cfg_db();
+        let p = Playlist {
+            id: 1,
+            name: "t".into(),
+            item_ids: vec!["a".into(), "b".into()],
+            interval_sec: 60,
+            shuffle: false,
+        };
+        assert!(!has_rotation_ctx(&c), "没有激活列表时应为 false");
+        save_ctx(&c, &fresh_ctx(CTX_UNIFIED, p, 0)).unwrap();
+        assert!(has_rotation_ctx(&c));
+        db::set_setting(&c, "playlist_rotation_paused", "true").unwrap();
+        assert!(has_rotation_ctx(&c), "暂停不是「没得切」");
+        clear_ctx(&c, CTX_UNIFIED);
+        assert!(!has_rotation_ctx(&c), "上下文移除后没得切");
     }
 
     /// 每壁纸播放设置的三态语义：缺失=跟随全局、有值=专属、全空=删键。

@@ -582,10 +582,12 @@ export interface Playlist {
   shuffle: boolean;
 }
 
-/** 轮播运行状态（无激活列表时仅 active/paused 两字段） */
+/** 轮播运行状态（无激活列表时没有 id/name 等字段，但 paused/switchable 始终有） */
 export interface PlaylistStatus {
   active: boolean;
   paused: boolean;
+  /** 有可切换的轮播上下文（统一激活列表 / 独立模式已绑定的屏）；暂停不影响，上一张/下一张看它 */
+  switchable?: boolean;
   /** unified=全局一份；independent=每屏各自绑定 */
   mode?: string;
   id?: number;

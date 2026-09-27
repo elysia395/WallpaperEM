@@ -611,7 +611,9 @@ export function LibraryPage({ onOpenDetail }: { onOpenDetail: (id: string) => vo
 
         {/* 轮播运行指示 + 快捷控制（唯一的启动/暂停入口：启用轮播按钮已移除） */}
         {(plStatus?.active || boundNames.size > 0 || activeList) && (() => {
-          const running = Boolean(plStatus?.active || boundNames.size > 0);
+          // 有没有可切换的上下文（暂停不算 —— 暂停的只是定时自动切换，上一张/下一张
+          // 照旧能点）；手动设过单张壁纸后后端会清掉上下文，这里跟着变回「未在轮播」
+          const running = Boolean(plStatus?.switchable ?? (plStatus?.active || boundNames.size > 0));
           return (
           <span className="ml-auto flex items-center gap-2 rounded-full bg-[var(--accent)]/10 px-3 py-0.5 text-[12px] text-[var(--text-2)]">
             <span className="text-[var(--accent-strong)]">▶</span>

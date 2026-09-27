@@ -2,7 +2,8 @@
 //
 // 七个动作各有绑定（默认一组，可录制替换）：
 //   主窗口显示/隐藏 · 壁纸设置窗口显示/隐藏 · 手动暂停/播放 · 自动暂停开启/关闭 ·
-//   定时切换开启/关闭 · 下一个壁纸 · 上一个壁纸（后两个仅定时切换开启时生效）。
+//   定时切换开启/关闭 · 下一个壁纸 · 上一个壁纸（后两个在存在轮播列表时生效：
+//   暂停轮播也照旧能手动切，列表被移除 —— 停止轮播 / 手动设了单张壁纸 —— 才忽略）。
 //
 // 注册策略（macOS 的关键取舍）：
 //   - **⌘+单键**（⌘M/⌘H 这类系统惯例键）注册为**应用菜单快捷键**：全局注册会
@@ -646,13 +647,16 @@ pub fn dispatch(app: &AppHandle, action: &str) {
             }
         }
         "next_wallpaper" | "prev_wallpaper" => {
-            // 需求：仅定时切换开启时有效。开启 = 有轮播在跑且未暂停
+            // 有「可切换的轮播上下文」就有效：暂停只停定时自动切换，手动上一张/下一张
+            // 照旧要走；上下文被移除后（停止轮播 / 手动设了单张壁纸）才真的没得切
             let st = crate::wallpaper::playlist_status(app.clone())
                 .unwrap_or_else(|_| serde_json::json!({ "active": false, "paused": false }));
-            let running = st.get("active").and_then(|v| v.as_bool()).unwrap_or(false)
-                && !st.get("paused").and_then(|v| v.as_bool()).unwrap_or(true);
-            if !running {
-                tracing::debug!("hotkey {action}: 定时切换未开启，忽略");
+            let switchable = st
+                .get("switchable")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            if !switchable {
+                tracing::debug!("hotkey {action}: 没有可切换的轮播上下文，忽略");
                 return;
             }
             let r = if action == "next_wallpaper" {
