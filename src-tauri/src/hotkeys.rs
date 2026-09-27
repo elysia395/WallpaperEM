@@ -71,13 +71,52 @@ fn default_bindings(action: &str) -> Vec<String> {
 
 /// 系统/菜单已占用、不建议覆盖的组合（macOS）。⌘M/⌘H 不在其中 —— 它们正是
 /// 「主窗口显示/隐藏」的默认值，属于我们自己的动作。
-#[cfg(target_os = "macos")]
-pub const RESERVED: &[&str] = &[
+///
+/// 两份平台清单都常驻（不用 cfg 从编译里删掉），好让单测在任何平台上都能把两份
+/// 解析一遍：CI 只构建不跑 cargo test，若各自清单只在各自平台校验，另一份永远
+/// 没人看（键名写错不报错，只是静默不命中）。
+#[allow(dead_code)]
+const RESERVED_MACOS: &[&str] = &[
     "cmd+q", "cmd+w", "cmd+space", "cmd+tab", "cmd+`", "cmd+z", "cmd+shift+z", "cmd+x", "cmd+c",
     "cmd+v", "cmd+a",
 ];
+
+/// Windows / Linux 的保留组合。命中只影响「冲突确认框」这一层提示（前端拿它比对录制
+/// 结果），真能不能注册上仍由系统说了算 —— X11 会放行不少桌面组合，覆盖后表现为把
+/// 桌面的快捷键抢过来（GNOME 的 Ctrl+Alt+←/→ 切工作区就是这样）。
+/// 不列 `cmd+*`（super）：Windows 的 Win 键在系统层就被截走，webview 收不到，录制框
+/// 根本录不出这个修饰键，列了也是永远命中不了的死条目。
+#[allow(dead_code)]
+const RESERVED_OTHER: &[&str] = &[
+    // 窗口/任务切换（Windows 与多数 Linux 桌面同）
+    "alt+f4",
+    "alt+tab",
+    "alt+esc",
+    // Windows 专有
+    "ctrl+shift+esc",
+    "ctrl+shift+delete",
+    // Linux 桌面（GNOME/KDE 默认键位）
+    "ctrl+alt+t",
+    "ctrl+alt+l",
+    "ctrl+alt+delete",
+    "ctrl+alt+arrowleft",
+    "ctrl+alt+arrowright",
+    "ctrl+alt+arrowup",
+    "ctrl+alt+arrowdown",
+    // 文本编辑惯例（与 mac 那份同口径）
+    "ctrl+c",
+    "ctrl+v",
+    "ctrl+x",
+    "ctrl+a",
+    "ctrl+z",
+    "ctrl+shift+z",
+];
+
+/// 当前平台的保留组合（`hotkeys_list` 返回给前端做冲突提示）
+#[cfg(target_os = "macos")]
+pub const RESERVED: &[&str] = RESERVED_MACOS;
 #[cfg(not(target_os = "macos"))]
-pub const RESERVED: &[&str] = &["ctrl+alt+delete", "ctrl+c", "ctrl+v", "ctrl+x", "ctrl+a"];
+pub const RESERVED: &[&str] = RESERVED_OTHER;
 
 const SETTING_KEY: &str = "hotkeys_v1";
 
@@ -510,16 +549,24 @@ pub fn retranslate(app: &AppHandle) {
 pub fn dispatch(app: &AppHandle, action: &str) {
     match action {
         "toggle_main_window" => {
-            let visible = app
-                .get_webview_window("main")
-                .map(|w| w.is_visible().unwrap_or(false))
+            // 「在眼前」= 可见**且未最小化**：Win32 的 IsWindowVisible 与 GTK 的
+            // widget visible 对最小化窗口都返回 true，只看 is_visible 的话在
+            // Windows/Linux 上按热键只会反复最小化、永远唤不回来（mac 之所以看着
+            // 正常，是最小化被观察者立刻销毁了窗口，下一次查到的是 None）。
+            let win = app.get_webview_window("main");
+            let shown = win
+                .as_ref()
+                .map(|w| w.is_visible().unwrap_or(false) && !w.is_minimized().unwrap_or(false))
                 .unwrap_or(false);
-            if visible {
-                // 与窗口关闭同语义：隐藏即释放（minimize 观察器会销毁窗口回收内存）
-                if let Some(w) = app.get_webview_window("main") {
+            if shown {
+                // 与窗口关闭同语义：mac 上最小化随即释放窗口（内存立刻归还）；
+                // Windows/Linux 没有这条观察者，最小化只是留在任务栏
+                if let Some(w) = win {
                     let _ = w.minimize();
                 }
             } else {
+                // 最小化/已释放/不存在都走这里：ensure_main_window 内部会
+                // unminimize + show + set_focus，必要时按原配置重建
                 crate::main_window::ensure_main_window(app);
             }
         }
@@ -650,6 +697,19 @@ mod tests {
         assert!(is_mac_menu_accel("cmd+p")); // ⌘+单键一律菜单级（不劫持其它 App）
         assert!(!is_mac_menu_accel("cmd+shift+m")); // 多修饰 → 全局
         assert!(!is_mac_menu_accel("ctrl+m")); // 非 ⌘ 修饰 → 全局
+    }
+
+    #[test]
+    fn reserved_entries_parse_as_shortcuts() {
+        // 保留组合只喂给前端做「系统/菜单保留组合」提示比对，条目写错（例如
+        // Linux 那组的 arrow 键名）不会报错、只会静默不命中 —— 两个平台的清单
+        // 都解析一遍，把错字钉住
+        for accel in RESERVED_MACOS.iter().chain(RESERVED_OTHER) {
+            assert!(
+                accel.parse::<Shortcut>().is_ok(),
+                "保留组合无法解析: {accel}"
+            );
+        }
     }
 
     #[test]

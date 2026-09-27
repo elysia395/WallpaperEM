@@ -8,12 +8,45 @@
 //
 // 冲突处理（「被占用了需要有提示，可以取消或者覆盖」）：
 //   - 与其它动作的绑定冲突 → 弹确认框：取消 / 覆盖（从对方移走并绑到本项）；
-//   - 与系统/菜单保留组合（⌘Q 等）冲突 → 弹确认框：取消 / 覆盖（force 落盘）。
+//   - 与系统/菜单保留组合（⌘Q、Alt+F4 等）冲突 → 弹确认框：取消 / 覆盖（force 落盘）。
+//
+// 平台适配：默认绑定与保留组合由后端给（mac 是 ⌘M/⌘H/⌘⇧M 那一档，Windows/Linux
+// 是 Ctrl+Shift+字母），本页只负责**按平台渲染**（符号 / Ctrl、说明文案）—— 平台
+// 判定统一走 lib/platform 的 useOs（首帧猜测 + app_info 校准），别自己嗅 navigator。
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, type HotkeyItem, type HotkeysInfo } from "../api/steam";
 import { tr, trMsg, useLocale } from "../lib/i18n";
+import { useOs, type OsId } from "../lib/platform";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { useMessage } from "../components/Message";
+
+/** 按得了但注册不了的物理键位：Rust 侧（global-hotkey 的键名表）没有这些键名。
+ *  不拦的话用户只会收到后端那句「无法识别的快捷键 xxx」——ISO/JIS 键盘的
+ *  IntlBackslash / IntlRo、多媒体键盘的浏览器键、Fn 都会落在这里 */
+const UNSUPPORTED_CODES = new Set([
+  "IntlBackslash",
+  "IntlRo",
+  "IntlYen",
+  "ContextMenu",
+  "NumpadComma",
+  "Fn",
+  "FnLock",
+  "Hyper",
+  "Super",
+  "Help",
+  "BrowserBack",
+  "BrowserForward",
+  "BrowserRefresh",
+  "BrowserStop",
+  "BrowserSearch",
+  "BrowserFavorites",
+  "BrowserHome",
+  "LaunchApp1",
+  "LaunchApp2",
+  "Convert",
+  "NonConvert",
+  "KanaMode",
+]);
 
 /** KeyboardEvent → 绑定串（如 "cmd+shift+p"）。返回 null = 纯修饰键/不认识，继续等 */
 function comboFromEvent(e: KeyboardEvent): string | null {
@@ -39,26 +72,31 @@ function comboFromEvent(e: KeyboardEvent): string | null {
   return [...mods, key].join("+");
 }
 
-/** 绑定串 → 展示文案（mac 用符号，其余用 Ctrl+Shift+P 式） */
-function prettyCombo(accel: string): string {
-  const isMac = navigator.platform.toLowerCase().includes("mac");
+/** 绑定串 → 展示文案。mac 用符号连写（⌘⇧P），Windows/Linux 用 Ctrl+Shift+P 式；
+ *  super/cmd 在 Windows 上叫 Win、Linux 上叫 Super（同一个键，三个平台三种叫法） */
+function prettyCombo(accel: string, os: OsId): string {
+  const modifier = (p: string): string | null => {
+    switch (p) {
+      case "cmd":
+        return os === "macos" ? "⌘" : os === "windows" ? "Win" : "Super";
+      case "ctrl":
+        return os === "macos" ? "⌃" : "Ctrl";
+      case "alt":
+        return os === "macos" ? "⌥" : "Alt";
+      case "shift":
+        return os === "macos" ? "⇧" : "Shift";
+      default:
+        return null;
+    }
+  };
   return accel
     .split("+")
-    .map((p) => {
-      switch (p) {
-        case "cmd":
-          return isMac ? "⌘" : "Win";
-        case "ctrl":
-          return isMac ? "⌃" : "Ctrl";
-        case "alt":
-          return isMac ? "⌥" : "Alt";
-        case "shift":
-          return isMac ? "⇧" : "Shift";
-        default:
-          return p.length === 1 ? p.toUpperCase() : p.replace(/^f(\d+)$/i, "F$1");
-      }
-    })
-    .join(isMac ? "" : "+");
+    .map(
+      (p) =>
+        modifier(p) ??
+        (p.length === 1 ? p.toUpperCase() : p.replace(/^f(\d+)$/i, "F$1")),
+    )
+    .join(os === "macos" ? "" : "+");
 }
 
 interface PendingConflict {
@@ -70,12 +108,15 @@ interface PendingConflict {
 
 export function HotkeysPage() {
   useLocale();
+  const os = useOs();
   const msg = useMessage();
   const [info, setInfo] = useState<HotkeysInfo | null>(null);
   const [recording, setRecording] = useState<string | null>(null); // 动作 id
   const [conflict, setConflict] = useState<PendingConflict | null>(null);
   const recordingRef = useRef<string | null>(null);
   recordingRef.current = recording;
+  /** 绑定改动的串行闸（见 removeOne） */
+  const mutatingRef = useRef(false);
 
   const reload = useCallback(async () => {
     try {
@@ -103,11 +144,38 @@ export function HotkeysPage() {
 
   const commitCombo = useCallback(
     async (action: string, accel: string, force: boolean) => {
-      await api.hotkeysSet(action, [accel], force);
+      // 追加而不是替换：一个动作可以挂多条绑定（mac 的主窗口默认就有 ⌘M/⌘H/⌘⇧M
+      // 三条），录一条就把其余顶掉会让用户莫名丢键。删单条走行内的 ✕。
+      const cur = info?.items.find((it) => it.id === action)?.bindings ?? [];
+      const next = cur.includes(accel) ? cur : [...cur, accel];
+      await api.hotkeysSet(action, next, force);
       msg.success(tr("快捷键已更新"));
       await finishRecording();
     },
-    [finishRecording, msg],
+    [finishRecording, info, msg],
+  );
+
+  /** 移除某条绑定（空列表 = 该动作暂不绑定，见 Rust hotkeys_set） */
+  const removeOne = useCallback(
+    async (action: string, accel: string) => {
+      // 串行闸：连点两次 ✕ 会各自基于同一份旧列表计算，后到的请求把先前的删除又
+      // 写回去（表现为「删掉的键自己回来了」）
+      if (mutatingRef.current) return;
+      mutatingRef.current = true;
+      const cur = info?.items.find((it) => it.id === action)?.bindings ?? [];
+      try {
+        await api.hotkeysSet(
+          action,
+          cur.filter((b) => b !== accel),
+        );
+        await reload();
+      } catch (e) {
+        msg.error(tr("快捷键设置失败：{err}", { err: trMsg(String(e)) }));
+      } finally {
+        mutatingRef.current = false;
+      }
+    },
+    [info, reload, msg],
   );
 
   const onCaptured = useCallback(
@@ -154,6 +222,10 @@ export function HotkeysPage() {
       e.stopPropagation();
       if (e.code === "Escape") {
         void finishRecording();
+        return;
+      }
+      if (UNSUPPORTED_CODES.has(e.code)) {
+        msg.info(tr("这个按键不支持作为快捷键"));
         return;
       }
       const accel = comboFromEvent(e);
@@ -240,9 +312,13 @@ export function HotkeysPage() {
     <div className="mx-auto flex h-full w-full max-w-[760px] flex-col px-6 py-5">
       <div className="mb-1 text-[17px] font-semibold">{tr("快捷键")}</div>
       <div className="mb-4 text-[12px] leading-relaxed text-[var(--text-2)]">
-        {tr(
-          "全局生效：游戏/其它应用在前台也能用。⌘M、⌘H 这类 macOS 系统惯例键只在 WallpaperEM 内生效（避免劫持其它应用）；主窗口隐藏后用 ⌘⇧M 全局唤回。点「录制」后按下新组合键，Esc 取消。",
-        )}
+        {os === "macos"
+          ? tr(
+              "全局生效：游戏/其它应用在前台也能用。⌘M、⌘H 这类 macOS 系统惯例键只在 WallpaperEM 内生效（避免劫持其它应用）；主窗口隐藏后用 ⌘⇧M 全局唤回。点「录制」添加新组合（原绑定保留），每条右侧的 ✕ 可移除；Esc 取消录制。",
+            )
+          : tr(
+              "全局生效：游戏/其它应用在前台也能用。默认一组 Ctrl+Shift+字母。点「录制」添加新组合（原绑定保留），每条右侧的 ✕ 可移除；Esc 取消录制。",
+            )}
       </div>
 
       {!info ? (
@@ -255,9 +331,11 @@ export function HotkeysPage() {
             <HotkeyRow
               key={it.id}
               item={it}
+              os={os}
               recording={recording === it.id}
               onRecord={() => void startRecording(it.id)}
               onCancelRecord={() => void finishRecording()}
+              onRemove={(accel) => void removeOne(it.id, accel)}
               onReset={() => void resetOne(it.id)}
             />
           ))}
@@ -271,10 +349,10 @@ export function HotkeysPage() {
             conflict.reserved
               ? tr(
                   "「{combo}」是系统/菜单保留组合，占用后可能不生效或引发异常。仍然覆盖？",
-                  { combo: prettyCombo(conflict.accel) },
+                  { combo: prettyCombo(conflict.accel, os) },
                 )
               : tr("「{combo}」已被「{who}」占用。覆盖后将从对方移除。", {
-                  combo: prettyCombo(conflict.accel),
+                  combo: prettyCombo(conflict.accel, os),
                   who: conflict.occupier,
                 })
           }
@@ -290,15 +368,19 @@ export function HotkeysPage() {
 
 function HotkeyRow({
   item,
+  os,
   recording,
   onRecord,
   onCancelRecord,
+  onRemove,
   onReset,
 }: {
   item: HotkeyItem;
+  os: OsId;
   recording: boolean;
   onRecord: () => void;
   onCancelRecord: () => void;
+  onRemove: (accel: string) => void;
   onReset: () => void;
 }) {
   return (
@@ -316,9 +398,17 @@ function HotkeyRow({
             item.bindings.map((b) => (
               <span
                 key={b}
-                className="rounded-lg border border-[var(--separator)] bg-[var(--content)] px-2.5 py-1 text-[12px] tabular-nums"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--separator)] bg-[var(--content)] px-2.5 py-1 text-[12px] tabular-nums"
               >
-                {prettyCombo(b)}
+                {prettyCombo(b, os)}
+                <button
+                  className="text-[11px] leading-none text-[var(--text-2)] hover:text-[var(--text-1)]"
+                  title={tr("移除")}
+                  aria-label={tr("移除")}
+                  onClick={() => onRemove(b)}
+                >
+                  ✕
+                </button>
               </span>
             ))
           )}
