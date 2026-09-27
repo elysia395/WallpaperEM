@@ -194,7 +194,10 @@ function compileBackend(): BackendPattern[] {
       last = (m.index ?? 0) + m[0].length;
     }
     src += escapeRe(zh.slice(last)) + "$";
-    out.push({ re: new RegExp(src), to: en, names });
+    // `s` 必须有：占位符捕获的是**任意内容**，其中可能含换行
+    // （「工程校验未通过：\n- {err1}\n- {err2}」这类多行错误），
+    // 关掉 dotAll 时 `.+?` 到换行就停，整句永远匹配不上。
+    out.push({ re: new RegExp(src, "s"), to: en, names });
   }
   // 长模板优先：更具体的原文先匹配，避免短模板抢走长句
   out.sort((a, b) => b.names.length - a.names.length || b.re.source.length - a.re.source.length);

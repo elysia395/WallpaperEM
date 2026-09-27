@@ -76,7 +76,9 @@ fn en(zh: &str) -> Option<&'static str> {
         "裁剪" => "Crop",
         "缩放" => "Fit",
         "拉伸" => "Stretch",
-        "清晰度" => "Quality",
+        // 托盘「画质档位」子菜单里，与「画面清晰度」滑条同名同义；用 Sharpness
+        // 而不是 Quality —— 后者会和子菜单标题「Quality Preset」自己撞车
+        "清晰度" => "Sharpness",
         "自动" => "Auto",
         "省电" => "Battery Saver",
         "标准" => "Standard",

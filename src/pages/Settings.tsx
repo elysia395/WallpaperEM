@@ -2397,7 +2397,8 @@ function AboutPanel() {
           {phase === "idle" && tr("尚未检查更新")}
           {phase === "checking" && tr("正在检查…")}
           {phase === "latest" && tr("已是最新版本")}
-          {phase === "error" && `${tr("检查更新失败")}${errMsg ? `：${trMsg(errMsg)}` : ""}`}
+          {phase === "error" &&
+            (errMsg ? tr("检查更新失败：{msg}", { msg: trMsg(errMsg) }) : tr("检查更新失败"))}
           {phase === "available" &&
             (installing
               ? tr("正在安装更新…")

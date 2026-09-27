@@ -8,6 +8,7 @@
     "dev": "node scripts/dev-guard.mjs && vite",
     "build": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
+    "i18n:audit": "node scripts/i18n-audit.mjs",
     "tauri": "tauri"
   },
   "dependencies": {

@@ -30,6 +30,9 @@ export const EN_US: Record<string, string> = {
   "发现": "Discover",
   "工坊": "Workshop",
   "下载": "Downloads",
+  "并行下载数": "Parallel downloads",
+  "同时下载的壁纸数量（1-6，默认 3）。改动立即生效；Steam 同账号并发登录受限时，失败任务会自动重试":
+    "How many wallpapers download at once (1–6, default 3). Takes effect immediately; tasks failed by Steam concurrent-login limits are retried automatically",
   "本地库": "Library",
   "收藏": "Favorites",
   "设置": "Settings",
@@ -399,6 +402,7 @@ export const EN_US: Record<string, string> = {
   "正在检查…": "Checking…",
   "已是最新版本": "You're on the latest version",
   "检查更新失败": "Update check failed",
+  "检查更新失败：{msg}": "Update check failed: {msg}",
   "发现新版本 {v}": "New version {} is available",
   "发布于 {date}": "Published {}",
   "更新内容": "What's new",
@@ -673,12 +677,15 @@ export const EN_US: Record<string, string> = {
 
   // ---------------- 快捷键页 ----------------
   "快捷键": "Hotkeys",
-  "全局生效：游戏/其它应用在前台也能用。⌘M、⌘H 这类 macOS 系统惯例键只在 WallpaperEM 内生效（避免劫持其它应用）；主窗口隐藏后用 ⌘⇧M 全局唤回。点「录制」后按下新组合键，Esc 取消。":
-    "Global: they work even when a game or another app is in front. macOS conventions like ⌘M/⌘H only work inside WallpaperEM (so they never hijack other apps) — use ⌘⇧M to bring the main window back from anywhere. Click Record and press a new combo; Esc cancels.",
+  "全局生效：游戏/其它应用在前台也能用。⌘M、⌘H 这类 macOS 系统惯例键只在 WallpaperEM 内生效（避免劫持其它应用）；主窗口隐藏后用 ⌘⇧M 全局唤回。点「录制」添加新组合（原绑定保留），每条右侧的 ✕ 可移除；Esc 取消录制。":
+    "Global: they work even when a game or another app is in front. macOS conventions like ⌘M/⌘H only work inside WallpaperEM (so they never hijack other apps) — use ⌘⇧M to bring the main window back from anywhere. Record adds a combo (existing bindings are kept); the ✕ on each one removes it; Esc cancels recording.",
+  "全局生效：游戏/其它应用在前台也能用。默认一组 Ctrl+Shift+字母。点「录制」添加新组合（原绑定保留），每条右侧的 ✕ 可移除；Esc 取消录制。":
+    "Global: they work even when a game or another app is in front. The defaults are Ctrl+Shift+letter. Record adds a combo (existing bindings are kept); the ✕ on each one removes it; Esc cancels recording.",
   "按下快捷键…（Esc 取消）": "Press a shortcut… (Esc to cancel)",
   "未绑定": "Not bound",
   "录制": "Record",
   "默认": "Default",
+  "这个按键不支持作为快捷键": "This key can't be used as a shortcut",
   "快捷键冲突": "Shortcut conflict",
   "「{combo}」是系统/菜单保留组合，占用后可能不生效或引发异常。仍然覆盖？":
     "“{combo}” is reserved by the system/menu — taking it may not work or cause weird behavior. Override anyway?",
@@ -719,8 +726,326 @@ export const EN_US: Record<string, string> = {
   "下一个壁纸": "Next Wallpaper",
   "上一个壁纸": "Previous Wallpaper",
 
-};
 
+  // ---------------- 多显示器 / 切换列表 / 分享等界面词条（原先误落在后端表，已归位） ----------------
+  "显示器": "Displays",
+  "每块屏独立管理壁纸；「更换壁纸」只作用于所选屏":
+    "Manage each display's wallpaper individually; “Change wallpaper” targets only that screen",
+  "统一模式": "Unified mode",
+  "独立模式": "Independent mode",
+  "统一模式：应用壁纸时同步替换所有显示器的壁纸":
+    "Unified: applying a wallpaper replaces it on all displays",
+  "独立模式：每块屏可各自指定壁纸（与后续各自的切换列表）；点「应用」时选择目标屏":
+    "Independent: each display gets its own wallpaper (and playlist later); pick a target display when applying",
+  "已切换到统一模式": "Switched to unified mode",
+  "已切换到独立模式": "Switched to independent mode",
+  "全部停止": "Stop all",
+  "已停止全部壁纸": "All wallpapers stopped",
+  "未检测到显示器": "No displays detected",
+  "显示器布局": "Display layout",
+  "主屏": "Primary",
+  "当前：{title}": "Current: {title}",
+  "未设置壁纸": "No wallpaper set",
+  "更换壁纸": "Change wallpaper",
+  "同步到所有屏": "Sync to all displays",
+  "已同步到所有显示器": "Synced to all displays",
+  "应用到哪块屏？": "Apply to which display?",
+  "全部显示器": "All displays",
+  "上次": "Last used",
+  "正在为「{name}」选择壁纸 —— 点「应用」只设置该屏":
+    "Choosing a wallpaper for “{name}” — clicking apply sets only that screen",
+  "已应用到桌面（可点击重新应用或指定屏）":
+    "Applied to desktop (click to re-apply or target a display)",
+  "切换列表": "Playlists",
+  "新建": "New",
+  "轮播": "Slideshow",
+  "轮播：{name}（{i}/{t}）": "Slideshow: {name} ({i}/{t})",
+  "轮播：{name} {i}/{t}": "Slideshow: {name} {i}/{t}",
+  "已暂停自动切换": "Auto-rotation paused",
+  "{cd} 后切换": "Next in {cd}",
+  "暂停轮播": "Pause slideshow",
+  "恢复轮播": "Resume slideshow",
+  "停止轮播": "Stop slideshow",
+  "已停止轮播": "Slideshow stopped",
+  "已启用轮播": "Slideshow started",
+  "随机": "Shuffle",
+  "删除切换列表": "Delete playlist",
+  "确定删除「{name}」？壁纸本身不受影响。":
+    "Delete “{name}”? The wallpapers themselves are not affected.",
+  "已删除「{name}」": "Deleted “{name}”",
+  "新建切换列表": "New playlist",
+  "列表名称": "Playlist name",
+  "间隔": "Every",
+  "分钟": "min",
+  "随机播放（一轮内不重复）": "Shuffle (no repeats within a round)",
+  "请填写列表名称": "Please enter a playlist name",
+  "加入切换列表": "Add to playlist",
+  "新列表名称": "New playlist name",
+  "默认切换间隔": "Default interval",
+  "新建切换列表时的默认切换间隔，单个列表可在编辑时修改":
+    "Default rotation interval for new playlists; each list can override it",
+  "默认随机播放": "Shuffle by default",
+  "新建切换列表时默认开启随机（洗牌播放，一轮内不重复）":
+    "New playlists start with shuffle on (no repeats within a round)",
+  "仅充电时轮播": "Rotate only when charging",
+  "开启后电池供电时暂缓自动切换，手动切换不受影响（暂仅 macOS）":
+    "Auto-rotation is held over on battery; manual switching unaffected (macOS only for now)",
+  "轮播列表": "Slideshow playlist",
+  "固定（不轮播）": "Fixed (no rotation)",
+  "「{name}」已固定为当前壁纸": "“{name}” is now fixed to its current wallpaper",
+  "「{name}」开始轮播": "“{name}” is now rotating",
+  "「{name}」未在轮播": "“{name}” is not rotating yet",
+  "到「显示器」页选择该列表开始轮播": "Pick this list on the Displays page to start rotating",
+  "已绑定：{names}": "Bound to {names}",
+  "未找到 ID 为 {id} 的壁纸": "No wallpaper found with ID {id}",
+  "壁纸ID下载": "Download by ID",
+  "输入创意工坊壁纸 ID 直接下载（无需搜索，网络受限时也能用）":
+    "Download directly by Workshop ID (no search needed — works on restricted networks)",
+  "壁纸 ID（创意工坊数字 ID）": "Wallpaper ID (numeric Workshop ID)",
+  "请输入数字壁纸 ID（创意工坊条目 ID）": "Enter a numeric Wallpaper ID (Workshop item ID)",
+  "已加入下载队列：{id}": "Queued for download: {id}",
+  "开启多选": "Multi-select",
+  "点选卡片批量加入切换列表": "Pick cards to batch-add to a playlist",
+  "全部": "All",
+  "建": "Create",
+  "{n} 块屏在轮播": "{n} displays rotating",
+  "已暂停": "Paused",
+  "重命名": "Rename",
+  "启用轮播": "Start slideshow",
+  "已把 {n} 张加入「{name}」": "Added {n} to “{name}”",
+  "已新建「{name}」": "Created “{name}”",
+  "移出「{name}」": "Remove from “{name}”",
+  "已从「{name}」移出 {n} 张": "Removed {n} from “{name}”",
+  "已选 {n} 张": "{n} selected",
+  "还没有切换列表": "No playlists yet",
+  "停止所有屏的壁纸": "Stop wallpapers on all displays",
+  "停止该屏壁纸": "Stop this display's wallpaper",
+  "还没有切换列表，先到本地库新建": "No playlists yet — create one in Library first",
+  "「{name}」还没有壁纸": "“{name}” has no wallpapers yet",
+  "当前筛选下没有「{name}」的壁纸": "No wallpapers of “{name}” match the current filters",
+  "开「选择」点选卡片，底部一键加入本列表":
+    "Turn on “Select”, pick cards, then add them from the bottom bar",
+  "本列表有 {n} 张，被当前搜索/筛选收窄没了":
+    "This playlist has {n} items — current search/filters are hiding them",
+  "清除筛选": "Clear filters",
+
+  // ---------------- 补齐：英文界面漏翻 / 间接取词（2026-09-27 i18n 覆盖率审计） ----------------
+  // 说明：tr(变量) 这类间接取词（标签表 / 选项表 / 档位表）也必须在本表里有键 ——
+  // 只写进 EN_US_BACKEND 是查不到的（tr 只读本表），早年就踩过这个坑。
+
+  // ---- 本地库 · 导入（引用方式批量入库）----
+  "多选文件夹，先加入下方列表，确认后以引用方式统一入库（不复制文件）":
+    "Pick several folders, add them to the list below, then import them all as links (no copies)",
+  "多选文件夹，引用入库不复制": "Pick several folders — linked in place, no copies",
+  "把所选目录作为一个壁纸拷贝进库": "Copy the selected folder into the library as one wallpaper",
+  "待添加文件夹": "Folders to add",
+  "（引用方式，可添加多个不同文件夹后统一导入）":
+    "(linked in place — add several different folders, then import them together)",
+  "导入这 {n} 个文件夹": "Import these {n} folders",
+  "点上方「添加壁纸目录」选择一个或多个文件夹":
+    "Use “Add wallpaper folder” above to pick one or more folders",
+  "从待添加列表移除（尚未入库，不影响源文件夹）":
+    "Remove from the list (not imported yet — the source folder is untouched)",
+  "暂无壁纸目录": "No wallpaper folders yet",
+
+  // ---- 分享 / 分享页 ----
+  "分享": "Share",
+  "分享壁纸": "Share wallpaper",
+  "分享页": "Share page",
+  "直链": "Direct link",
+  "复制链接": "Copy link",
+  "已复制": "Copied",
+  "已复制分享页链接": "Share page link copied",
+  "永久": "Never",
+  "1 小时": "1 hour",
+  "1 天": "1 day",
+  "7 天": "7 days",
+  "有效期": "Expires",
+  "过期时间：{time}": "Expires: {time}",
+  "到 {time} 过期": "Expires {time}",
+  "浏览 {n}": "{n} views",
+  "创建分享链接": "Create share link",
+  "创建后得到一个链接，任何浏览器打开都能渲染这张壁纸（访客渲染在自己的设备上，不影响你的桌面）":
+    "Creates a link that renders this wallpaper in any browser (visitors render on their own device — your desktop is unaffected)",
+  "网页类型壁纸会直接在访客浏览器里运行其网页代码（与 Wallpaper Engine 官方分享行为一致），请确认来源可信":
+    "Web wallpapers run their own web code in the visitor's browser (the same as official Wallpaper Engine sharing) — make sure you trust the source",
+  "创建后可在「分享」页中启停或删除；分享功能需保持网络服务开启":
+    "Manage or delete it on the Shares page; sharing needs the network service to stay on",
+  "扫码打开分享页": "Scan to open the share page",
+  "本机模式下只有这台电脑打得开；局域网/任意模式下同网设备（或公网）可访问":
+    "In Local mode only this computer can open it; in LAN/Any mode same-network devices (or the internet) can reach it",
+  "生成浏览器可打开的分享链接": "Create a link that opens in any browser",
+  "把壁纸变成一个链接，任何浏览器打开都能渲染（访客渲染在自己的设备上，不影响你的桌面）":
+    "Turn a wallpaper into a link that renders in any browser (visitors render on their own device — your desktop is unaffected)",
+  "分享已删除": "Share deleted",
+  "分享功能": "Sharing",
+  "开启：库卡片与详情页的「分享」可生成链接，浏览器打开即可渲染壁纸。shareId 即访问凭据，仅限看这一张壁纸":
+    "On: “Share” on library cards and the detail page creates a link that renders the wallpaper in a browser. The shareId is the access credential, and it only exposes this one wallpaper",
+  "关闭（默认）：不对外提供分享页。要分享壁纸时再打开，减少暴露面":
+    "Off (default): no share pages are served. Turn it on only when you need it, to keep the exposure small",
+  "网络服务未开启，分享链接暂时无法访问（设置 → 网络与服务）":
+    "The network service is off, so share links are unreachable (Settings → Network & Service)",
+  "去设置": "Open settings",
+  "还没有分享。在库卡片或详情页点「分享」即可创建（永久或限时）":
+    "No shares yet. Click “Share” on a library card or the detail page to create one (permanent or time-limited)",
+  "分享功能已关闭：列表保留，打开上方开关即可恢复访问":
+    "Sharing is off: the list is kept — turn the switch above back on to restore access",
+  "当前为本机模式：只有这台电脑打得开；切到局域网/任意模式后手机才能扫码访问":
+    "Currently in Local mode: only this computer can open it. Switch to LAN/Any mode so your phone can scan and open it",
+
+  // ---- 设置 · 网络与服务 ----
+  "网络与服务": "Network & Service",
+  "网络服务": "Network service",
+  "网络服务已启用": "Network service enabled",
+  "网络服务已关闭": "Network service disabled",
+  "已关闭：AI 客户端（Codex / Claude 等）与 REST API 无法连接。开启后按下方网络模式监听，连接需带访问令牌":
+    "Off: AI clients (Codex / Claude, etc.) and the REST API cannot connect. When on, the service listens per the network mode below, and connections must carry the access token",
+  "网络模式": "Network mode",
+  "本机": "Local",
+  "局域网": "LAN",
+  "任意": "Any",
+  "网络模式已切换为 {mode}": "Network mode switched to {mode}",
+  "本机（默认）：仅本机可访问": "Local (default): only this computer can connect",
+  "局域网：同一网络内的设备可访问（跨设备调用 API、打开分享链接）；公网来源一律拒绝，访问仍需令牌":
+    "LAN: devices on the same network can connect (call the API, open share links); public sources are always refused, and access still needs the token",
+  "任意：不限来源（公网可达与否取决于路由器/防火墙）。仅建议在防火墙保护下使用；首次对外监听时系统防火墙会弹授权框":
+    "Any: no source restriction (public reachability depends on your router/firewall). Only recommended behind a firewall; the system firewall prompts for permission the first time it listens publicly",
+  "局域网地址": "LAN address",
+  "同一网络内的其它设备用这个地址访问服务；分享链接与二维码也基于它生成":
+    "Other devices on your network use this address; share links and the QR code are built from it",
+  "已复制局域网地址": "LAN address copied",
+  "二维码": "QR code",
+  "手机扫码直达服务（分享页与 API 文档上线后可直接扫码打开）":
+    "Scan with your phone to open the service (share pages and API docs open straight from the code once available)",
+  "服务监听端口（默认 7411，改完自动热重启）。被占用时上方会显示失败原因":
+    "Service port (default 7411; changes restart the service automatically). If the port is taken, the reason shows above",
+  "开启后壁纸可响应整个系统的声音（如音乐软件），与 WE 桌面端一致；macOS 需在「隐私与安全性 → 录屏与系统录音 → 仅系统录音」中允许（无自动弹框，改动后需重新开关或重启应用），Windows 无需授权。壁纸自带的音乐无需此开关也会可视化":
+    "When on, wallpapers can react to system-wide audio (music players, etc.), matching WE on the desktop. On macOS you must allow it under Privacy & Security → Screen & System Audio Recording → “System Audio only” (there is no automatic prompt; after changing it, toggle this again or restart the app). Windows needs no permission. Music bundled with a wallpaper is visualised without this switch.",
+
+  // ---- 设置 · 画质（含滤镜 / 切换效果）----
+  "画质": "Quality",
+  "自定义": "Custom",
+  "高斯模糊": "Gaussian blur",
+  "黑白": "Black & white",
+  "怀旧": "Sepia",
+  "鲜艳": "Vivid",
+  "暖色": "Warm",
+  "冷色": "Cool",
+  "反色": "Inverted",
+  "提亮": "Brighter",
+  "压暗": "Darker",
+  "高对比": "High contrast",
+  "自定义：手动调整下方任意参数即进入自定义。点档位一键套用预设，整体覆盖下方画质参数（显示模式/滤镜等观感设置不动）":
+    "Custom: adjusting any parameter below switches to Custom. Clicking a preset applies it in one go and overwrites the quality parameters below (display mode / filter style settings stay as they are)",
+  "视频纹理清晰度": "Video texture clarity",
+  "场景里的视频纹理每帧上传的清晰度。自动 = 按实测帧率往下压（推荐：WKWebView 下逐帧上传要同步取像素，全屏视频层是掉帧主因）；固定档在视频清晰度与流畅度之间手动取舍，改动即时生效":
+    "Clarity of the video textures uploaded each frame in scenes. Auto lowers it based on the measured frame rate (recommended: on WKWebView every frame upload copies pixels synchronously, which is the main cause of frame drops in full-screen video layers). A fixed step trades video clarity for smoothness by hand; changes apply immediately.",
+  "自动（按帧率）": "Auto (by frame rate)",
+  "高清 ×1.00": "High ×1.00",
+  "标准 ×0.70": "Standard ×0.70",
+  "省电 ×0.50": "Power saving ×0.50",
+  "贴图解码/上传的分辨率倍率（0.50–1.00，1=原生）：去掉看不出来的过采样，画面逐像素不变但省显存。改动后壁纸重载一次":
+    "Texture decode/upload resolution scale (0.50–1.00, 1 = native): drops oversampling you cannot see — pixel-identical output, less VRAM. The wallpaper reloads once after a change.",
+  "法线/蒙版贴图的分辨率倍率（0.35–1.00，默认 1 不缩）：折射与光照对模糊敏感，非必要不动。改动后壁纸重载一次":
+    "Normal/mask texture resolution scale (0.35–1.00, 1 = no downscale): refraction and lighting are blur-sensitive — leave it unless needed. The wallpaper reloads once after a change.",
+  "抗锯齿方案优化中：当前所有档位一律关闭且禁止更改（FXAA/MSAA 在部分壁纸上有瑕疵），后续版本开放":
+    "Anti-aliasing is being reworked: it stays off on every preset and cannot be changed (FXAA/MSAA show artefacts on some wallpapers); a later version will enable it",
+  "抗锯齿方案优化中：当前所有档位一律关闭且禁止更改，后续版本开放":
+    "Anti-aliasing is being reworked: it stays off on every preset and cannot be changed; a later version will enable it",
+  "关：效果链直通（辉光/水波等画面效果全无，最省性能）":
+    "Off: effect chain bypassed (no glow/ripple effects at all — the cheapest option)",
+  "滤镜": "Filter",
+  "整个画面的色彩效果，实时热切、不重载壁纸；与托盘菜单「滤镜效果」是同一设置":
+    "Full-screen colour effect, switched live without reloading the wallpaper; the same setting as “Filter” in the tray menu",
+  "切换效果": "Transition effect",
+  "叠化（默认）：新壁纸淡入盖过旧壁纸。换到另一张壁纸时生效":
+    "Cross-fade (default): the new wallpaper fades in over the old one. Applies when switching to another wallpaper.",
+  "推近：新壁纸从 130% 缩回原位淡入。换到另一张壁纸时生效":
+    "Zoom in: the new wallpaper fades in while scaling back from 130%. Applies when switching to another wallpaper.",
+  "模糊：新壁纸由重失焦变清晰淡入。换到另一张壁纸时生效":
+    "Blur: the new wallpaper fades in from heavy defocus to sharp. Applies when switching to another wallpaper.",
+  "景深：推近与失焦同时收拢，观感更立体。换到另一张壁纸时生效":
+    "Depth: zoom and defocus settle together for a stronger sense of depth. Applies when switching to another wallpaper.",
+  "圆形揭示：新壁纸光圈从屏幕中心展开。换到另一张壁纸时生效":
+    "Circle reveal: the new wallpaper opens out from the centre of the screen. Applies when switching to another wallpaper.",
+  "横向擦除：新壁纸从左向右擦出，覆盖旧壁纸。换到另一张壁纸时生效":
+    "Wipe: the new wallpaper wipes in from left to right over the old one. Applies when switching to another wallpaper.",
+  "滑入：新壁纸整幅从右侧滑入，覆盖旧壁纸。换到另一张壁纸时生效":
+    "Slide: the new wallpaper slides in from the right over the old one. Applies when switching to another wallpaper.",
+  "叠化": "Cross-fade",
+  "推近": "Zoom in",
+  "模糊": "Blur",
+  "景深": "Depth",
+  "圆形揭示": "Circle reveal",
+  "横向擦除": "Wipe",
+  "滑入": "Slide",
+  "看得见就播：壁纸几乎被完全遮挡（全屏应用、最大化窗口、屏保）时自动暂停，重新露出就自动恢复播放；每块屏幕独立判断，与前台应用无关（手动暂停不受影响）":
+    "Play while visible: the wallpaper auto-pauses when it is almost fully covered (full-screen apps, maximised windows, screen saver) and resumes as soon as it is visible again. Every display is judged on its own and the frontmost app does not matter (manual pause is unaffected)",
+
+  // ---- 壁纸设置窗口 · 画质档位 ----
+  "画质档位": "Quality preset",
+  "低：省电优先 — 清晰度 0.75 · 15 FPS · 粒子/后处理低 · 贴图 60% · 法线 75%":
+    "Low: power saving first — clarity 0.75 · 15 FPS · particles/post low · textures 60% · normals 75%",
+  "中：均衡 — 清晰度 0.85 · 30 FPS · 粒子/后处理中 · 贴图 80%":
+    "Medium: balanced — clarity 0.85 · 30 FPS · particles/post medium · textures 80%",
+  "原生": "Native",
+  "贴图倍率": "Texture scale",
+  "法线倍率": "Normal scale",
+  "关（已锁定）": "Off (locked)",
+  "雨/雪/火花/雾等粒子数量；低/中档按比例缩数量与发射率，关=不渲染":
+    "Count of rain/snow/spark/fog particles; low/medium scale the count and emission rate down; off = not rendered",
+  "辉光/模糊/水波等画面效果；低/中档压效果链分辨率，关=效果链直通":
+    "Glow/blur/ripple effects; low/medium lower the effect-chain resolution; off = effect chain bypassed",
+  "这些设置只作用于本张壁纸，切换壁纸后各自保留。选「跟随全局」则使用设置 → 画质里的值。":
+    "These settings apply to this wallpaper only and are kept when you switch. “Follow global” uses the values from Settings → Quality.",
+
+  // ---- 上传到创意工坊（Steam 客户端 / 网页）----
+  "上传到创意工坊（Steam 客户端 / 网页）": "Upload to the Workshop (Steam client / web)",
+  "更新到创意工坊（Steam 客户端 / 网页）": "Update on the Workshop (Steam client / web)",
+  " · 更新已发布条目": " · Update published item",
+  "Steam 客户端上传": "Upload via Steam client",
+  "网页接口上传": "Upload via web",
+  "在应用内填写信息并直接提交，可看上传进度；需要本机运行 Steam 客户端、登录账号拥有 Wallpaper Engine":
+    "Fill in the details here and submit directly, with upload progress; requires the Steam client running on this machine and a signed-in account that owns Wallpaper Engine",
+  "用系统浏览器打开该条目的工坊网页版编辑页，在网页上提交更新（走浏览器里的 Steam 登录态）":
+    "Opens this item's Workshop editor in your browser to submit the update (uses the browser's Steam sign-in)",
+  "自动整理好内容文件夹，并用系统浏览器打开工坊网页版新建页，在网页上选择该文件夹完成发布（不依赖 Steam 客户端）":
+    "Prepares the content folder and opens the Workshop creation page in your browser; pick that folder there to publish (no Steam client needed)",
+  "网页版更新工坊条目": "Update Workshop item on the web",
+  "网页版上传到创意工坊": "Upload to the Workshop on the web",
+  "正在整理壁纸内容并打开网页…": "Preparing the wallpaper content and opening the page…",
+  "已在浏览器打开该条目的网页版编辑页，在页面上修改信息并提交更新即可。":
+    "The item's web editor is open in your browser — edit the details there and submit the update.",
+  "已自动整理好上传内容，并在浏览器打开工坊「新建条目」页、在文件管理器中定位到内容文件夹。请在网页上：":
+    "The upload content is ready: the Workshop “Create item” page is open in your browser and the content folder is revealed in your file manager. On that page:",
+  "填写标题、描述等信息": "Fill in the title, description and other details",
+  "「内容文件夹 / Content folder」选择已为你打开的这个文件夹（内容已按工坊要求整理）":
+    "For “Content folder”, pick the folder that was opened for you (its contents already match what the Workshop expects)",
+  "「预览图 / Preview image」从该文件夹里选择 preview.png / preview.jpg（如有）":
+    "For “Preview image”, pick preview.png / preview.jpg from that folder if present",
+  "同意 Steam 工坊条款后点提交": "Accept the Steam Workshop agreement and submit",
+  "无法打开浏览器": "Could not open the browser",
+  "我知道了": "Got it",
+
+  // ---- 应用内更新 ----
+  "正在安装更新…": "Installing update…",
+  "更新已安装，重启软件后生效": "Update installed — restart the app to apply it",
+  "下载完成，正在校验签名并安装…": "Download complete — verifying the signature and installing…",
+  "下载更新并安装": "Download and install update",
+  "重启并完成更新": "Restart and finish updating",
+
+  // ---- 界面杂项 ----
+  "导航": "Navigation",
+  "最小化": "Minimize",
+  "还原": "Restore",
+  "最大化": "Maximize",
+  "预设": "Preset",
+  "{n} 项": "{n} items",
+  "macOS 动态壁纸引擎 · 极致优雅的开源壁纸软件，绝非单纯的WE复刻":
+    "macOS dynamic wallpaper engine · an elegant open-source wallpaper app, not merely a WE clone",
+  "跨平台动态壁纸引擎 · 极致优雅的开源壁纸软件，绝非单纯的WE复刻":
+    "Cross-platform dynamic wallpaper engine · an elegant open-source wallpaper app, not merely a WE clone",
+};
 export const EN_US_BACKEND: Record<string, string> = {
   // ⚠️ 键 = Rust 侧**格式化后**会产出的中文原文（含 {} 占位符的位置，与后端 format!
   // 的写法逐字对齐；Rust 的 {:?} 这类格式说明符在译文里写成 {} 即可）。
@@ -1049,151 +1374,387 @@ export const EN_US_BACKEND: Record<string, string> = {
   "服务异常退出: {e}": "Service exited unexpectedly: {}",
   "端口需大于 1024（避开系统保留端口）": "Port must be greater than 1024 (to avoid reserved ports)",
 
-  // ---------------- 多显示器管理（显示器页 / 应用目标选择） ----------------
-  "显示器": "Displays",
-  "每块屏独立管理壁纸；「更换壁纸」只作用于所选屏":
-    "Manage each display's wallpaper individually; “Change wallpaper” targets only that screen",
-  "统一模式": "Unified mode",
-  "独立模式": "Independent mode",
-  "统一模式：应用壁纸时同步替换所有显示器的壁纸":
-    "Unified: applying a wallpaper replaces it on all displays",
-  "独立模式：每块屏可各自指定壁纸（与后续各自的切换列表）；点「应用」时选择目标屏":
-    "Independent: each display gets its own wallpaper (and playlist later); pick a target display when applying",
-  "已切换到统一模式": "Switched to unified mode",
-  "已切换到独立模式": "Switched to independent mode",
-  "全部停止": "Stop all",
-  "已停止全部壁纸": "All wallpapers stopped",
   "正在读取显示器信息…": "Reading display info…",
-  "未检测到显示器": "No displays detected",
-  "显示器布局": "Display layout",
-  "主屏": "Primary",
-  "当前：{title}": "Current: {title}",
-  "未设置壁纸": "No wallpaper set",
-  "更换壁纸": "Change wallpaper",
-  "同步到所有屏": "Sync to all displays",
-  "已同步到所有显示器": "Synced to all displays",
   "停止": "Stop",
-  "应用到哪块屏？": "Apply to which display?",
-  "全部显示器": "All displays",
-  "上次": "Last used",
-  "正在为「{name}」选择壁纸 —— 点「应用」只设置该屏":
-    "Choosing a wallpaper for “{name}” — clicking apply sets only that screen",
-  "已应用到桌面（可点击重新应用或指定屏）":
-    "Applied to desktop (click to re-apply or target a display)",
 
-  // ---------------- 切换列表 / 轮播 ----------------
-  "切换列表": "Playlists",
   "自动切换壁纸的列表；启用后按间隔轮播，可随时暂停":
     "Wallpaper rotation lists — enable one to rotate at an interval; pause anytime",
-  "新建": "New",
   "编辑": "Edit",
   "启用": "Start",
   "使用中": "In use",
-  "轮播": "Slideshow",
   "轮播中：{name}（{i}/{t}）": "Slideshow: {name} ({i}/{t})",
-  "轮播：{name}（{i}/{t}）": "Slideshow: {name} ({i}/{t})",
-  "轮播：{name} {i}/{t}": "Slideshow: {name} {i}/{t}",
-  "已暂停自动切换": "Auto-rotation paused",
-  "{cd} 后切换": "Next in {cd}",
   "计时中…": "Timing…",
-  "暂停轮播": "Pause slideshow",
-  "恢复轮播": "Resume slideshow",
-  "停止轮播": "Stop slideshow",
-  "已停止轮播": "Slideshow stopped",
-  "已启用轮播": "Slideshow started",
   "还没有切换列表 —— 点右上角「新建」，挑几张壁纸定时轮播":
     "No playlists yet — hit “New” and pick some wallpapers to rotate",
   "{n} 项 · 每 {t} 切换": "{n} items · every {t}",
-  "随机": "Shuffle",
   "{m} 分钟": "{m} min",
   "{s} 秒": "{s} s",
-  "删除切换列表": "Delete playlist",
-  "确定删除「{name}」？壁纸本身不受影响。":
-    "Delete “{name}”? The wallpapers themselves are not affected.",
-  "已删除「{name}」": "Deleted “{name}”",
   "编辑切换列表": "Edit playlist",
-  "新建切换列表": "New playlist",
-  "列表名称": "Playlist name",
-  "间隔": "Every",
-  "分钟": "min",
-  "随机播放（一轮内不重复）": "Shuffle (no repeats within a round)",
   "播放顺序（{n} 项）": "Play order ({n} items)",
   "从下方本地库添加壁纸": "Add wallpapers from the library below",
   "移出列表": "Remove from playlist",
   "添加壁纸": "Add wallpapers",
   "本地库没有匹配的壁纸": "No matching wallpapers in the library",
-  "请填写列表名称": "Please enter a playlist name",
   "请至少添加一张壁纸": "Add at least one wallpaper",
   "已保存「{name}」": "Saved “{name}”",
-  "加入切换列表": "Add to playlist",
   "该壁纸已在「{name}」中": "Already in “{name}”",
   "已把「{title}」加入「{name}」": "Added “{title}” to “{name}”",
   "还没有切换列表，在下方新建一个": "No playlists yet — create one below",
   "{n} 项": "{n} items",
   "已含": "Included",
-  "新列表名称": "New playlist name",
   "新建并加入": "Create & add",
   "已新建「{name}」并加入": "Created “{name}” and added it",
 
-  // ---------------- 设置 · 轮播默认值 ----------------
-  "默认切换间隔": "Default interval",
-  "新建切换列表时的默认切换间隔，单个列表可在编辑时修改":
-    "Default rotation interval for new playlists; each list can override it",
-  "默认随机播放": "Shuffle by default",
-  "新建切换列表时默认开启随机（洗牌播放，一轮内不重复）":
-    "New playlists start with shuffle on (no repeats within a round)",
-  "仅充电时轮播": "Rotate only when charging",
-  "开启后电池供电时暂缓自动切换，手动切换不受影响（暂仅 macOS）":
-    "Auto-rotation is held over on battery; manual switching unaffected (macOS only for now)",
 
-  // ---------------- 每屏轮播绑定（独立模式） ----------------
-  "轮播列表": "Slideshow playlist",
-  "固定（不轮播）": "Fixed (no rotation)",
-  "「{name}」已固定为当前壁纸": "“{name}” is now fixed to its current wallpaper",
-  "「{name}」开始轮播": "“{name}” is now rotating",
   "「{name}」将在所选屏上轮播": "“{name}” will rotate on the selected display",
   "还没有切换列表，先到「切换列表」页新建":
     "No playlists yet — create one on the Playlists page first",
-  "已绑定：{names}": "Bound to {names}",
   "独立模式：{n} 块屏在各自轮播，可在显示器页调整":
     "Independent: {n} displays rotating on their own — manage them on the Displays page",
   "绑定到显示器": "Bind to display",
 
-  // ---------------- ID 搜索 / ID 直下载 ----------------
-  "未找到 ID 为 {id} 的壁纸": "No wallpaper found with ID {id}",
-  "壁纸ID下载": "Download by ID",
-  "输入创意工坊壁纸 ID 直接下载（无需搜索，网络受限时也能用）":
-    "Download directly by Workshop ID (no search needed — works on restricted networks)",
-  "壁纸 ID（创意工坊数字 ID）": "Wallpaper ID (numeric Workshop ID)",
-  "请输入数字壁纸 ID（创意工坊条目 ID）": "Enter a numeric Wallpaper ID (Workshop item ID)",
-  "已加入下载队列：{id}": "Queued for download: {id}",
 
-  // ---------------- 切换列表（本地库内联管理） ----------------
-  "开启多选": "Multi-select",
   "预设": "Preset",
-  "点选卡片批量加入切换列表": "Pick cards to batch-add to a playlist",
-  "全部": "All",
-  "建": "Create",
-  "{n} 块屏在轮播": "{n} displays rotating",
-  "已暂停": "Paused",
-  "重命名": "Rename",
-  "启用轮播": "Start slideshow",
-  "已把 {n} 张加入「{name}」": "Added {n} to “{name}”",
-  "已新建「{name}」": "Created “{name}”",
-  "移出「{name}」": "Remove from “{name}”",
-  "已从「{name}」移出 {n} 张": "Removed {n} from “{name}”",
-  "已选 {n} 张": "{n} selected",
-  "还没有切换列表": "No playlists yet",
 
-  // ---------------- 显示器页 ----------------
-  "停止所有屏的壁纸": "Stop wallpapers on all displays",
-  "停止该屏壁纸": "Stop this display's wallpaper",
-  "还没有切换列表，先到本地库新建": "No playlists yet — create one in Library first",
-  "「{name}」还没有壁纸": "“{name}” has no wallpapers yet",
-  "当前筛选下没有「{name}」的壁纸": "No wallpapers of “{name}” match the current filters",
-  "开「选择」点选卡片，底部一键加入本列表":
-    "Turn on “Select”, pick cards, then add them from the bottom bar",
-  "本列表有 {n} 张，被当前搜索/筛选收窄没了":
-    "This playlist has {n} items — current search/filters are hiding them",
-  "清除筛选": "Clear filters",
+  // ---------------- 补齐：Rust 侧错误/状态消息（2026-09-27 覆盖率审计） ----------------
+  // ---- 媒体桥 / 内容服务器 ----
+  "媒体桥接未初始化": "Media bridge not initialised",
+  "{item}: 无任何 HTML 入口（无法应用）": "{item}: no HTML entry point (cannot apply)",
+  "{item}/{rel}: 未注入种子脚本": "{item}/{rel}: seed script was not injected",
+  // ---- 封面缓存 ----
+  "壁纸目录不存在": "Wallpaper folder does not exist",
+  "请求失败: {e}": "Request failed: {e}",
+  "远端返回 {}": "Remote returned {}",
+  "远端封面超过体积上限": "The remote cover exceeds the size limit",
+  "读取失败: {e}": "Read failed: {e}",
+  "远端返回的不是图片": "The remote response is not an image",
+  "写封面失败: {e}": "Failed to write the cover: {e}",
+  "落盘封面失败: {e}": "Failed to save the cover: {e}",
+  "封面解码失败: {e}": "Failed to decode the cover: {e}",
+  "封面尺寸为 0": "Cover size is 0",
+  "封面转码失败: {e}": "Failed to transcode the cover: {e}",
+  // ---- 下载（PTY） ----
+  "PTY master 已交出": "PTY master already handed over",
+  // ---- 快捷键 ----
+  "空快捷键": "Empty shortcut",
+  "缺少按键": "Missing key",
+  "至少需要一个修饰键（⌘/Ctrl/Alt/Shift）或使用 F 键":
+    "At least one modifier (⌘/Ctrl/Alt/Shift) is required, or use an F-key",
+  "无法识别的快捷键 {accel}: {e}": "Unrecognised shortcut {accel}: {e}",
+  "快捷键 {accel} 注册失败（可能被系统或其它应用占用）: {e}":
+    "Failed to register {accel} (it may be taken by the system or another app): {e}",
+  "快捷键未初始化": "Hotkeys are not initialised",
+  "未知的快捷键动作: {action}": "Unknown hotkey action: {action}",
+  "快捷键 {hit} 已被「{}」占用": "Shortcut {hit} is already taken by “{}”",
+  "未知的快捷键动作: {id}": "Unknown hotkey action: {id}",
+  // ---- 钥匙串 ----
+  "Keychain 初始化失败: {e}": "Keychain initialisation failed: {e}",
+  "Keychain 写入失败: {e}": "Keychain write failed: {e}",
+  "Keychain 读取失败: {e}": "Keychain read failed: {e}",
+  "Keychain 删除失败: {e}": "Keychain delete failed: {e}",
+  // ---- 本地库 ----
+  "没有可添加的文件夹": "No folders to add",
+  "无法为「{raw_name}」分配库内唯一 id":
+    "Could not allocate a unique library id for “{raw_name}”",
+  "不在本地库": "Not in the local library",
+  // ---- MCP / REST API ----
+  "不支持的设置键: {key}（可读写: {}）": "Unsupported settings key: {key} (readable/writable: {})",
+  "未知的网络模式: {mode}（可选 loopback/lan/any）":
+    "Unknown network mode: {mode} (use loopback/lan/any)",
+  "JSON 解析失败: {e}": "JSON parse failed: {e}",
+  "不支持的方法: {other}": "Unsupported method: {other}",
+  "resources/read 缺少 uri": "resources/read is missing uri",
+  "未知资源: {other}": "Unknown resource: {other}",
+  "未知模板: {kind}": "Unknown template: {kind}",
+  "# {kind} 模板文件\n\n": "# {kind} template file\n\n",
+  "prompts/get 缺少 name": "prompts/get is missing name",
+  "，主题：{topic}": ", topic: {topic}",
+  "未知 prompt: {other}": "Unknown prompt: {other}",
+  "缺少 id": "Missing id",
+  "缺少 paused": "Missing paused",
+  "缺少 values 对象（或传 reset=true 清除覆盖）":
+    "Missing values object (or pass reset=true to clear overrides)",
+  "工坊服务未就绪": "Workshop service not ready",
+  "参数不合法: {e}": "Invalid argument: {e}",
+  "未知工具: {other}": "Unknown tool: {other}",
+  "壁纸引擎未就绪": "Wallpaper engine not ready",
+  "本地库里没有条目: {item_id}": "No such item in the local library: {item_id}",
+  "缺少参数 {key}（需要非空字符串）": "Missing parameter {key} (a non-empty string is required)",
+  "缺少参数 {key}（需要整数）": "Missing parameter {key} (an integer is required)",
+  "{name} 的 properties 不是对象": "{name}'s properties is not an object",
+  "{name} 的 required 不是数组: {v}": "{name}'s required is not an array: {v}",
+  // ---- 分享 ----
+  "DB 锁失败": "Database lock failed",
+  "该分享已停用": "This share is disabled",
+  "该分享已过期": "This share has expired",
+  "缺少 itemId": "Missing itemId",
+  "该壁纸不在本地库中": "That wallpaper is not in the local library",
+  "壁纸无法渲染：{e}": "The wallpaper cannot render: {e}",
+  "跳转构造失败": "Failed to build the redirect",
+  "壁纸文件不存在：{e}": "Wallpaper file does not exist: {e}",
+  // ---- 进程/内存观测 · 正在播放 ----
+  "本进程 {}": "this process {}",
+  "{line}；无归属进程": "{line}; no owning process",
+  "播放器未接受该媒体控制请求": "The player did not accept that media-control request",
+  // ---- Steam 登录（RSA） ----
+  "publickey_mod 不是合法 hex": "publickey_mod is not valid hex",
+  "publickey_exp 不是合法 hex": "publickey_exp is not valid hex",
+  "消息过长，无法做 PKCS#1 v1.5 填充": "Message too long for PKCS#1 v1.5 padding",
+  "内部错误：填充后消息不小于模数":
+    "Internal error: the padded message is not smaller than the modulus",
+  // ---- 应用内更新 ----
+  "下载更新失败: {e}": "Failed to download the update: {e}",
+  "安装更新失败: {e}": "Failed to install the update: {e}",
+  // ---- 壁纸引擎（建窗 / 换纸 / 平台细节） ----
+  "显示器 {}": "Display {}",
+  "内容服务器端口未就绪": "Content server port not ready",
+  "「暂停释放内存」挂起中": "“Release memory on pause” is suspending",
+  "建窗超时": "Timed out creating the window",
+  "壁纸窗口在加载中消失": "the wallpaper window disappeared while loading",
+  "会话已清（停止壁纸）": "the session was cleared (wallpaper stopped)",
+  "抗锯齿已锁定为关闭（方案优化中，暂不支持更改）":
+    "Anti-aliasing is locked off (being reworked; not changeable yet)",
+  "目录不存在：{dir}": "Folder does not exist: {dir}",
+  "应用壁纸超时：主线程在创建壁纸窗口时卡住（请把日志发给作者）":
+    "Applying the wallpaper timed out: the main thread is stuck creating the wallpaper window (please send the log to the author)",
+  "找不到 Progman: {e}": "Progman not found: {e}",
+  "未找到壁纸 WorkerW": "Wallpaper WorkerW not found",
+  // ---- 上传到创意工坊 ----
+  "Steam 上传线程未就绪": "Steam upload thread not ready",
+  "上传任务投递失败: {e}": "Failed to dispatch the upload job: {e}",
+  "没有这个上传任务: {id}": "No such upload job: {id}",
+  "无法连接 Steam：{hint}（{e}）": "Cannot connect to Steam: {hint} ({e})",
+  "启动上传线程失败: {e}": "Failed to start the upload thread: {e}",
+  "Steam 提交失败: {e:?}": "Steam submission failed: {}",
+  "内容目录不存在: {}": "Content folder does not exist: {}",
+  "内容目录嵌套过深，疑似异常目录":
+    "Content folder nested too deeply — looks like an abnormal folder",
+  "读取 {name} 失败: {e}": "Failed to read {name}: {e}",
+  "写出 {stem}.tex 失败: {e}": "Failed to write {stem}.tex: {e}",
+  "复制 {name} 失败: {e}": "Failed to copy {name}: {e}",
+  "暂存内容超过上限 {} 字节": "Staged content exceeds the {} byte limit",
+  "条目内容目录不存在: {}": "Item content folder does not exist: {}",
+  "工程不存在: {name}": "Project does not exist: {name}",
+  "工程缺少 title（project.json 或参数里给一个）":
+    "The project has no title (set one in project.json or pass it in)",
+  "未知可见性: {other}（public/friends/private）":
+    "Unknown visibility: {other} (public/friends/private)",
+  "item_id 与 project 只能二选一": "Pass either item_id or project, not both",
+  "需要 item_id（本地库条目）或 project（工程名）之一":
+    "One of item_id (a local library item) or project (a project name) is required",
+
+  // ---- 工程工作区（MCP 创作工具） ----
+  "无法定位系统文档目录（MCP 工程工作区不可用）":
+    "Could not locate the system Documents folder (the MCP project workspace is unavailable)",
+  "创建工作区失败: {e}": "Failed to create the workspace: {e}",
+  "工程名不能为空": "Project name cannot be empty",
+  "工程名过长（上限 {MAX_PROJECT_NAME_CHARS} 字符）":
+    "Project name is too long (limit: {MAX_PROJECT_NAME_CHARS} characters)",
+  "工程名不能以 . 开头": "Project name cannot start with a dot",
+  "工程名不能包含路径分隔符": "Project name cannot contain path separators",
+  "工程名不能包含冒号或控制字符": "Project name cannot contain colons or control characters",
+  "工程名非法": "Invalid project name",
+  "路径不能为空": "Path cannot be empty",
+  "只接受工程内相对路径": "Only relative paths inside the project are accepted",
+  "路径不能包含 ..": "Path cannot contain ..",
+  "路径包含符号链接，已拒绝: {rel}": "Path contains a symlink — refused: {rel}",
+  "路径逃出工程目录": "Path escapes the project folder",
+  "读取工作区失败: {e}": "Failed to read the workspace: {e}",
+  "覆盖旧工程失败: {e}": "Failed to overwrite the existing project: {e}",
+  "写入 {rel} 失败: {e}": "Failed to write {rel}: {e}",
+  "工程不存在: {}": "Project does not exist: {}",
+  "base64 解码失败: {e}": "base64 decode failed: {e}",
+  "不支持的 encoding: {other}（可用 utf8 / base64）":
+    "Unsupported encoding: {other} (use utf8 / base64)",
+  "写入失败: {e}": "Write failed: {e}",
+  "文件不存在: {rel}": "File does not exist: {rel}",
+  "不是文件: {rel}": "Not a file: {rel}",
+  "读取目录失败: {e}": "Failed to read the folder: {e}",
+  "project.json 的 version 必须是 ≥ 1 的整数":
+    "project.json version must be an integer ≥ 1",
+  "project.json 的 version 必须是整数（不要写成字符串）":
+    "project.json version must be an integer (do not write it as a string)",
+  "project.json 缺少 version（≥ 1 的整数；发布与版本历史都靠它）":
+    "project.json has no version (an integer ≥ 1; publishing and version history rely on it)",
+  "project.json 的 type 不支持: {wtype}": "Unsupported project.json type: {wtype}",
+  "project.json 的 file 指向的文件不存在: {rel}":
+    "The file pointed to by project.json does not exist: {rel}",
+  "project.json 的 file 非法: {e}": "Invalid project.json file field: {e}",
+  "属性 {name} 不是对象": "Property {name} is not an object",
+  "属性 {name} 的 type 不支持: {ptype}": "Unsupported type for property {name}: {ptype}",
+  "属性 {name} 的第 {i} 个选项缺少 value": "Option {i} of property {name} has no value",
+  "属性 {name} 是 combo，但没有有效 options":
+    "Property {name} is a combo but has no valid options",
+  "属性 {name} 没有 order（面板里会排在最后）":
+    "Property {name} has no order (it will appear last in the panel)",
+  "objects 里 id={id} 重复（{label}）": "Duplicate id={id} in objects ({label})",
+  "对象 {label} 缺少 id": "Object {label} has no id",
+  "对象 {label} 的 size 不是 \"w h\" 二元组": "Object {label}'s size is not a \"w h\" pair",
+  "对象 {label} 引用的粒子预设不存在: {rel}":
+    "Object {label} references a particle preset that does not exist: {rel}",
+  "对象 {label} 没有 visible（默认按可见处理）":
+    "Object {label} has no visible field (treated as visible by default)",
+  "对象 {label} 的 image 路径非法: {model_rel}":
+    "Object {label} has an invalid image path: {model_rel}",
+  "对象 {label} 引用的模型不存在或不是合法 JSON: {model_rel}":
+    "Object {label} references a model that is missing or not valid JSON: {model_rel}",
+  "模型 {model_rel} 没有 material 字段": "Model {model_rel} has no material field",
+  "模型 {model_rel} 的 material 路径非法: {mat_rel}":
+    "Invalid material path in model {model_rel}: {mat_rel}",
+  "模型 {model_rel} 引用的材质不存在或非法: {mat_rel}":
+    "Model {model_rel} references a material that is missing or invalid: {mat_rel}",
+  "材质 {mat_rel} 缺少 passes 数组": "Material {mat_rel} has no passes array",
+  "材质 {mat_rel} 第 {pi} 个 pass 缺少 shader":
+    "Pass {pi} of material {mat_rel} has no shader",
+  "找不到源图": "Source image not found",
+  "工程校验未通过，先修好再打包：\n- {}":
+    "Project validation failed — fix it before packing:\n- {}",
+  "读取 {rel} 失败: {e}": "Failed to read {rel}: {e}",
+  "贴图 {rel} 转换失败: {e}": "Failed to convert texture {rel}: {e}",
+  "工程里没有任何可打包的文件": "The project has no packable files",
+  "打包条目重名: {}": "Duplicate package entry name: {}",
+  "写入 scene.pkg 失败: {e}": "Failed to write scene.pkg: {e}",
+  "不支持的图片格式: {other}": "Unsupported image format: {other}",
+  "图片尺寸为 0": "Image size is 0",
+  "不是合法 PNG": "Not a valid PNG",
+  "PNG 缺少 IHDR": "PNG has no IHDR",
+  "不是合法 JPEG": "Not a valid JPEG",
+  "JPEG 里找不到 SOF 尺寸段": "No SOF size segment in the JPEG",
+  "工程校验未通过：\n- {}": "Project validation failed:\n- {}",
+  "暂存旧安装目录失败: {e}": "Failed to stage the old install folder: {e}",
+  "写入 preview.png 失败: {e}": "Failed to write preview.png: {e}",
+
+  // ---- 补齐第二批（覆盖率审计扫出的 Rust 错误/状态文本）----
+  "静态正则": "static regex",
+  "ROSETTA_REQUIRED|steamcmd 的官方引导程序是 x86_64 版本，首次启动需要 Rosetta 2。请在终端执行：softwareupdate --install-rosetta --agree-to-license，完成后重试。（首次自更新后 steamcmd 会切换为原生 arm64 运行）":
+    "ROSETTA_REQUIRED|steamcmd's official bootstrap is an x86_64 build, so the first launch needs Rosetta 2. Run this in a terminal: softwareupdate --install-rosetta --agree-to-license, then retry. (After the first self-update steamcmd runs natively on arm64.)",
+  "条目 id「{}」已被引用导入占用（{}），请重命名源目录后重试":
+    "Item id “{}” is already taken by a linked import ({}); rename the source folder and try again",
+  "Origin 不是本机地址，已拒绝": "Origin is not a local address — refused",
+  "缺少或错误的 token": "Missing or wrong token",
+  "media-bridge 启动线程失联": "media-bridge launch thread lost",
+  "；归属进程 {} 个合计 {}": "; {} owning processes, {} in total",
+  "；最大 {} (pid {}, {})": "; largest {} (pid {}, {})",
+  // MCP 提示词（prompts/get 的正文；英文环境下给 AI 客户端的英文指令）
+  "自拟": "your own choice",
+  "WallpaperEM 壁纸创作流程": "WallpaperEM wallpaper authoring workflow",
+  "用 WallpaperEM 的 MCP 工具做一个场景壁纸{theme}（WE 原生 scene.json，打包成 scene.pkg）。\n1. 先读资源 wallpaperem://docs/scene-project（支持范围、坐标约定、坑）。\n2. project_create(type=\"scene\", name=\"{project}\", title=\"...\") 建工程。\n3. 用 project_write_file 写 scene.json、models/*.json、materials/*.json；贴图用 base64 写 materials/<名字>.png（scene_pack 会自动转成 .tex 并打进包）。\n4. project_validate → scene_pack → project_install → wallpaper_apply → wallpaper_screenshot。\n5. 截图不满意就改文件（改完必须重新 scene_pack 与 project_install）再看效果。\n注意：v1 支持图片图层 / 视差 / 关键帧动画 / 粒子预设，不支持自定义 shader 效果与 3D 模型。":
+    "Build a scene wallpaper with WallpaperEM's MCP tools{theme} (WE-native scene.json, packed into scene.pkg).\n1. Read the resource wallpaperem://docs/scene-project first (what is supported, coordinate conventions, pitfalls).\n2. project_create(type=\"scene\", name=\"{project}\", title=\"...\") to create the project.\n3. Use project_write_file for scene.json, models/*.json and materials/*.json; write textures as base64 into materials/<name>.png (scene_pack converts them to .tex and packs them in).\n4. project_validate → scene_pack → project_install → wallpaper_apply → wallpaper_screenshot.\n5. If the screenshot is not right, edit the files (re-run scene_pack and project_install afterwards) and look again.\nNote: v1 supports image layers / parallax / keyframe animation / particle presets; custom shader effects and 3D models are not supported.",
+  // 订阅同步 / 登录
+  "没有读到任何订阅条目（HTTP {status}，页面 {} 字节）。若账号确实有订阅，可能是订阅页结构已变化{hint}":
+    "No subscription entries were read (HTTP {status}, page {} bytes). If the account really has subscriptions, the page layout may have changed{hint}",
+  "本地没有该账号的密码（此前靠 steamcmd 缓存免密）。请到「设置 → 账号」重新输入一次账号密码，用于建立订阅同步的网页会话":
+    "No stored password for this account (it used to rely on the steamcmd cache). Enter the account password again under Settings → Account so a web session can be established for subscription sync",
+  "订阅同步：保存续期后的会话 token 失败（{e}）":
+    "Subscription sync: failed to save the renewed session token ({e})",
+  "订阅同步：扫码登录成功，已保存账号 {account} 的登录凭证":
+    "Subscription sync: QR sign-in succeeded — saved the credentials for account {account}",
+  // 应用内更新
+  "没有可用的更新（可能已是最新版本）": "No update available (you are probably on the latest version)",
+  // 画质参数校验
+  "场景帧率超出范围: {fps}（{SCENE_FPS_MIN}–{SCENE_FPS_MAX}）":
+    "Scene frame rate out of range: {fps} ({SCENE_FPS_MIN}–{SCENE_FPS_MAX})",
+  "未知的粒子质量档: {quality}（可选 {}）":
+    "Unknown particle quality step: {quality} (available: {})",
+  "未知的后处理质量档: {quality}（可选 {}）":
+    "Unknown post-processing quality step: {quality} (available: {})",
+  "资源倍率超出范围: {v}（{RESOURCES_MIN}–{RESOURCES_MAX}）":
+    "Texture scale out of range: {v} ({RESOURCES_MIN}–{RESOURCES_MAX})",
+  "法线资源倍率超出范围: {scale}（{RESOURCES_NORMAL_MIN}–{RESOURCES_NORMAL_MAX}）":
+    "Normal texture scale out of range: {scale} ({RESOURCES_NORMAL_MIN}–{RESOURCES_NORMAL_MAX})",
+  "未知的画质档位: {preset}（可选 low/medium/high）":
+    "Unknown quality preset: {preset} (use low/medium/high)",
+  "未知的切换效果: {reveal}（可选 {}）": "Unknown transition effect: {reveal} (available: {})",
+  "SetParent 后父窗口不是目标（target={}）":
+    "After SetParent the parent window is not the target (target={})",
+  // 并发锁（panic 文案，只在真出问题时出现）
+  "jobs 锁": "jobs lock",
+  "queue 锁": "queue lock",
+  "client 锁": "client lock",
+  // 工程工作区（第二批）
+  "{VERSION_DIR}/ 是版本历史目录，不能直接写入；用 project_snapshot / project_rollback 管理版本":
+    "{VERSION_DIR}/ is the version-history folder and cannot be written directly; use project_snapshot / project_rollback to manage versions",
+  "未知模板类型 `{kind}`（可用：{}）": "Unknown template type `{kind}` (available: {})",
+  "工程 `{}` 已存在（要覆盖请传 force=true）":
+    "Project `{}` already exists (pass force=true to overwrite)",
+  "文件过大（{} > 上限 {}）": "File too large ({} > limit {})",
+  "文件过大（{} 字节 > 上限 {limit}），请用 project_list_files 查看或直接读工程目录":
+    "File too large ({} bytes > limit {limit}); use project_list_files or read the project folder directly",
+  "project.json 的 tags 缺少年龄分级标签（必须是 {} 之一，默认 {DEFAULT_RATING}=大众级）":
+    "project.json tags have no age-rating tag (it must be one of {}; the default {DEFAULT_RATING} = Everyone)",
+  "project.json 的 tags 有多个年龄分级标签（{}），只能留一个":
+    "project.json tags contain more than one age-rating tag ({}); keep only one",
+  "属性 {name} 的 value 与 type={ptype} 不匹配（color/text 用字符串，slider 用数字，checkbox 用布尔）":
+    "Property {name}'s value does not match type={ptype} (color/text take strings, slider takes a number, checkbox takes a boolean)",
+  "对象 {label} 的 {field} 不是 \"x y z\" 三元组（受属性控制时用 {\"value\":\"x y z\"} 包装）":
+    "Object {label}'s {field} is not an \"x y z\" triple (when driven by a property, wrap it as {\"value\":\"x y z\"})",
+  "材质 {mat_rel} 第 {pi} 个 pass 用了 {shader}，但工程里没有 shaders/{shader}.frag/.vert（渲染器会跳过该 pass）":
+    "Pass {pi} of material {mat_rel} uses {shader}, but the project has no shaders/{shader}.frag/.vert (the renderer will skip that pass)",
+  "材质 {mat_rel} 引用的贴图缺失：需要 materials/{name}.tex 或 materials/{name}.png":
+    "A texture referenced by material {mat_rel} is missing: materials/{name}.tex or materials/{name}.png is required",
+  "贴图 materials/{name}.png 还没转成 .tex（scene_pack 会自动转换）":
+    "Texture materials/{name}.png has not been converted to .tex yet (scene_pack converts it automatically)",
+  "贴图 materials/{name} 无法解码（{e}）；scene_pack 转不出 .tex":
+    "Texture materials/{name} cannot be decoded ({e}); scene_pack cannot produce a .tex",
+  "scene_pack 只适用于 type=scene 的工程（当前 type={wtype}）；网页壁纸不需要打包":
+    "scene_pack only applies to type=scene projects (current type={wtype}); web wallpapers need no packing",
+  "工程过大（{} 字节 > 上限 {MAX_PACK_BYTES}），请把素材压小":
+    "Project too large ({} bytes > limit {MAX_PACK_BYTES}); shrink your assets",
+  "materials 下的 WebP 不受支持（渲染库会把 WebP 当视频纹理）：{rel}，请转成 PNG":
+    "WebP under materials is not supported (the render library treats WebP as a video texture): {rel} — convert it to PNG",
+
+
+  // ---------------- Rust 系统级文案镜像（托盘 / 快捷键动作 / 画质档位）----------------
+  // 为什么镜像：后端消息里会**嵌**这些标签（如「快捷键 X 已被「暂停壁纸」占用」），
+  // trMsg 的嵌套回译只认这两张前端表，Rust 自己那份 i18n.rs 它读不到。
+  // 改动 i18n.rs 时这里要同步 —— scripts/i18n-audit.mjs 会查漂移。
+  "显示主窗口": "Show Main Window",
+  "滤镜效果": "Filter",
+  "退出": "Quit",
+  "轮播：未启用": "Slideshow: off",
+  "壁纸": "Wallpapers",
+  "文件": "Files",
+
+  // ---- 补齐第三批（覆盖率审计扫出的漏判形状：match 分支映射文案 / 校验错误 / 状态原因）----
+  "更新清单不存在（新版本可能正在发布中）": "Update manifest not found (a new release may be publishing right now)",
+  "当前平台没有对应的更新清单": "No update manifest for this platform",
+  "下载失败（steamcmd 报 No Connection）。可能是网络不通，也可能是该账号未拥有 Wallpaper Engine —— steamcmd 对这两种情况返回同一个错误。请到「设置 → 网络」做一次 Steam 连通性探测来区分。": "Download failed (steamcmd reported No Connection). The network may be unreachable, or the account may not own Wallpaper Engine — steamcmd returns the same error for both. Run a Steam connectivity check under Settings → Network to tell them apart.",
+  "下载后端正则编译失败（{pattern}）: {e}": "Failed to compile a download-backend regex ({pattern}): {e}",
+  "子进程 stdin 管道不可用": "The child process's stdin pipe is unavailable",
+  "子进程 stdout 管道不可用": "The child process's stdout pipe is unavailable",
+  "子进程 stderr 管道不可用": "The child process's stderr pipe is unavailable",
+  "MULTILIB_REQUIRED|steamcmd 官方 Linux 引导程序是 32 位 x86 版本，需要 32 位运行时库。             Debian/Ubuntu：sudo dpkg --add-architecture i386 && sudo apt update &&              sudo apt install libc6:i386 libstdc++6:i386；             Fedora：sudo dnf install glibc.i686 libstdc++.i686；             Arch：启用 multilib 仓库后 sudo pacman -S lib32-glibc lib32-gcc-libs。             安装完成后重试。": "MULTILIB_REQUIRED|steamcmd's official Linux bootstrap is a 32-bit x86 build and needs 32-bit runtime libraries. Debian/Ubuntu: sudo dpkg --add-architecture i386 && sudo apt update && sudo apt install libc6:i386 libstdc++6:i386; Fedora: sudo dnf install glibc.i686 libstdc++.i686; Arch: enable the multilib repo, then sudo pacman -S lib32-glibc lib32-gcc-libs. Retry after installing.",
+  "应用重启，任务中断": "The app restarted, so the task was interrupted",
+  "目录里没有扫描到任何包含 project.json 的壁纸": "No wallpaper containing project.json was found in that folder",
+  "视频无法渲染（壁纸黑屏）": "Video cannot render (the wallpaper stays black)",
+  "无声": "No sound",
+  "媒体无法播放": "Media cannot play",
+  "H.264 解码器（gstreamer1.0-libav）→ mp4 视频壁纸无法播放": "H.264 decoder (gstreamer1.0-libav) → mp4 video wallpapers cannot play",
+  "非局域网来源，已拒绝": "Source is not on the local network — refused",
+  "本服务不提供服务端事件流（无服务端推送），请用 POST 发送请求": "This service does not offer a server-sent event stream (no server push); send requests with POST",
+  "Steam 已在运行但连接失败：确认账号已登录，且该账号拥有 Wallpaper Engine（Steam 要求工坊上传者拥有目标游戏）": "Steam is running but the connection failed: make sure you are signed in on an account that owns Wallpaper Engine (Steam requires Workshop uploaders to own the target game)",
+  "未尝试任何 DPI 上下文": "No DPI context was attempted",
+  "主题颜色": "Theme colour",
+  "改 scene.json / 换 materials 里的贴图": "Edit scene.json / swap the textures under materials",
+  "scene_pack 打包": "Pack with scene_pack",
+  "project_install 安装": "Install with project_install",
+  "wallpaper_screenshot 看效果": "Check the result with wallpaper_screenshot",
+  "改 index.html / main.js": "Edit index.html / main.js",
+  "缺少 project.json（工程根必须有它）": "Missing project.json (it is required at the project root)",
+  "project.json 不是合法 JSON": "project.json is not valid JSON",
+  "project.json 缺少 type（web / scene / video / gif / image）": "project.json has no type (web / scene / video / gif / image)",
+  "找不到网页入口：请提供 project.json 的 file，或 index.html / web/index.html": "Web entry point not found: set project.json's file, or provide index.html / web/index.html",
+  "缺少 scene.json": "Missing scene.json",
+  "scene.json 不是合法 JSON": "scene.json is not valid JSON",
+  "还没有 scene.pkg，安装前请先调用 scene_pack 打包": "No scene.pkg yet — call scene_pack before installing",
+  "scene.json 的 general.orthogonalprojection 缺 width/height（渲染分辨率会退化成窗口尺寸）": "scene.json's general.orthogonalprojection has no width/height (render resolution falls back to the window size)",
+  "scene.json 没有 camera（视差与 3D 类图层会异常）": "scene.json has no camera (parallax and 3D layers will misbehave)",
+  "scene.json 缺少 objects 数组": "scene.json has no objects array",
+  "scene.json 的 objects 为空（场景什么都没有）": "scene.json's objects is empty (the scene has nothing in it)",
+
+  // ---- 补齐第四批（审计规则修正后又抓到 4 条）----
+  "{base}。可能是缺少 32 位运行时：Debian/Ubuntu 执行                  sudo dpkg --add-architecture i386 && sudo apt install libc6:i386 libstdc++6:i386": "{base}. 32-bit runtime libraries may be missing: on Debian/Ubuntu run sudo dpkg --add-architecture i386 && sudo apt install libc6:i386 libstdc++6:i386",
+  "读数不可用": "Reading unavailable",
+  "请先启动 Steam 客户端并登录你的账号": "Start the Steam client and sign in first",
+  "project.json 没有 title（本地库里会显示目录名）": "project.json has no title (the library will show the folder name)",
 };
