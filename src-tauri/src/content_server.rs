@@ -5,6 +5,7 @@
 //! - 路径规范化防穿越；支持 Range（视频拖拽）；MIME 按扩展名
 //! - web 壁纸 iframe 只能访问自己目录内的资源
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -38,6 +39,13 @@ pub struct ContentServerState {
     /// 渲染器诊断快照：截图超时时用来说明「到底卡在哪一步」，
     /// 也用来判断「同一张壁纸是不是已经挂好了」（免掉重复挂载的整轮解析）
     pub renderer_diag: Arc<Mutex<RendererDiag>>,
+    /// 按窗口 label 分档的渲染器诊断（`/diag?win=<label>` 回流）。
+    ///
+    /// 全局快照（[`RendererDiag`] / `wallpaper_ready_ms`）只有一份，多屏并发
+    /// 挂载时会互相覆盖 —— 换纸等的是「自己那扇页」的 ready/failure，必须按
+    /// label 分开记（渲染器建窗时经 query 拿到自己的 label，见 renderer 的
+    /// WIN_LABEL）。
+    pub label_diag: Arc<Mutex<HashMap<String, LabelDiag>>>,
 }
 
 /// 渲染器最近一次诊断的汇总快照（`/diag` 每次上报都会更新）
@@ -53,6 +61,23 @@ pub struct RendererDiag {
     pub fail_item: String,
     /// 最近一次 `ready` 对应的本地库条目 id（解析自诊断文本的 src 段）
     pub ready_item: String,
+}
+
+/// 单个窗口 label 的渲染器诊断分档（字段语义与 [`RendererDiag`] 一致）。
+#[derive(Default, Clone)]
+pub struct LabelDiag {
+    /// 最近一条诊断原文
+    pub last: String,
+    /// 最近一次 `ready` 的时间戳（epoch millis）
+    pub ready_ms: u64,
+    /// 最近一次 `ready` 归属的条目 id
+    pub ready_item: String,
+    /// 最近一次 `failed:` 的时间戳
+    pub fail_ms: u64,
+    /// 最近一次 `failed:` 的原因
+    pub fail_reason: String,
+    /// 最近一次 `failed:` 归属的条目 id
+    pub fail_item: String,
 }
 
 impl ContentServerState {
@@ -91,23 +116,29 @@ pub fn ready_item(app: &tauri::AppHandle) -> Option<String> {
     (ms > 0 && !d.ready_item.is_empty()).then(|| d.ready_item.clone())
 }
 
+fn now_epoch_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
 /// 记一条渲染器诊断：ready 记时间戳（供截图等待）+ 条目 id（供重复截图免重挂），
 /// `failed: …` 记原因（供超时报错引用），其余只留最近一条原文。
-fn record_renderer_diag(state: &ContentServerState, msg: &str) {
-    let now_ms = || {
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_millis() as u64)
-            .unwrap_or(0)
-    };
-    if msg.ends_with("] ready") {
+///
+/// `win` = 上报窗口的 label（渲染器 query 的 `win` 键）：非空时同步记进
+/// [`ContentServerState::label_diag`] 分档，换纸按自己的 label 等 ready/failure。
+fn record_renderer_diag(state: &ContentServerState, msg: &str, win: Option<&str>) {
+    let now_ms = now_epoch_ms;
+    let is_ready = msg.ends_with("] ready");
+    if is_ready {
         state
             .wallpaper_ready_ms
             .store(now_ms(), std::sync::atomic::Ordering::Relaxed);
     }
     if let Ok(mut d) = state.renderer_diag.lock() {
         d.last = msg.to_string();
-        if msg.ends_with("] ready") {
+        if is_ready {
             if let Some(id) = diag_item_id(msg) {
                 d.ready_item = id;
             }
@@ -118,19 +149,90 @@ fn record_renderer_diag(state: &ContentServerState, msg: &str) {
             d.fail_item = diag_item_id(msg).unwrap_or_default();
         }
     }
+    if let Some(win) = win {
+        if let Ok(mut map) = state.label_diag.lock() {
+            let d = map.entry(win.to_string()).or_default();
+            d.last = msg.to_string();
+            if is_ready {
+                d.ready_ms = now_ms();
+                if let Some(id) = diag_item_id(msg) {
+                    d.ready_item = id;
+                }
+            }
+            if let Some((_, reason)) = msg.split_once("] failed: ") {
+                d.fail_reason = reason.to_string();
+                d.fail_ms = now_ms();
+                d.fail_item = diag_item_id(msg).unwrap_or_default();
+            }
+        }
+    }
 }
 
-/// 自 `since_ms`（含）之后、属于 `item` 的一次渲染失败原因（None = 没有匹配的失败）。
-///
-/// 无缝切换用它提前中止替换：新壁纸加载失败时旧壁纸继续留在屏上，而不是
-/// 把错误占位图换上去。`item` 为 None 时匹配任意失败（无条目归属的测试配置）。
-pub fn failure_since(
+/// 某窗口 `since_ms`（含）之后、属于 `item` 的一次 ready（None = 不校验条目归属）。
+/// 换纸按**自己的 label** 等这个 —— 全局 ready 槽会被多屏并发互相覆盖。
+pub fn label_ready_since(
     app: &tauri::AppHandle,
+    label: &str,
+    since_ms: u64,
+    item: Option<&str>,
+) -> bool {
+    app.try_state::<ContentServerState>()
+        .is_some_and(|s| label_ready_since_state(&s, label, since_ms, item))
+}
+
+fn label_ready_since_state(
+    state: &ContentServerState,
+    label: &str,
+    since_ms: u64,
+    item: Option<&str>,
+) -> bool {
+    let Some(d) = state
+        .label_diag
+        .lock()
+        .ok()
+        .and_then(|m| m.get(label).cloned())
+    else {
+        return false;
+    };
+    if d.ready_ms < since_ms || d.ready_ms == 0 {
+        return false;
+    }
+    match item {
+        Some(want) => d.ready_item == want,
+        None => true,
+    }
+}
+
+/// 清掉某个窗口 label 的诊断分档（窗口销毁时调用）。
+///
+/// 不清的话，下一个复用这个 label 的窗口会读到上一任的 ready 旧记录：
+/// 「记录显示已 ready 但这扇页还在加载」，截图/换纸就会抢跑。
+pub fn clear_label_diag(app: &tauri::AppHandle, label: &str) {
+    if let Some(state) = app.try_state::<ContentServerState>() {
+        if let Ok(mut map) = state.label_diag.lock() {
+            map.remove(label);
+        }
+    }
+}
+
+/// 某窗口 `since_ms`（含）之后、属于 `item` 的一次失败原因（None = 没有匹配的失败）。
+pub fn label_failure_since(
+    app: &tauri::AppHandle,
+    label: &str,
     since_ms: u64,
     item: Option<&str>,
 ) -> Option<String> {
     let state = app.try_state::<ContentServerState>()?;
-    let d = state.renderer_diag.lock().ok()?;
+    label_failure_since_state(&state, label, since_ms, item)
+}
+
+fn label_failure_since_state(
+    state: &ContentServerState,
+    label: &str,
+    since_ms: u64,
+    item: Option<&str>,
+) -> Option<String> {
+    let d = state.label_diag.lock().ok()?.get(label).cloned()?;
     if d.fail_reason.is_empty() || d.fail_ms < since_ms {
         return None;
     }
@@ -139,7 +241,7 @@ pub fn failure_since(
             return None;
         }
     }
-    Some(d.fail_reason.clone())
+    Some(d.fail_reason)
 }
 
 /// 给「等待渲染器就绪超时」类错误配一句人能看懂的原因（渲染器自报失败优先，
@@ -195,6 +297,7 @@ pub fn init(app: &AppHandle) -> Result<(), String> {
         sse_clients: std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
         wallpaper_ready_ms: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)),
         renderer_diag: Default::default(),
+        label_diag: Default::default(),
     };
     app.manage(state.clone());
 
@@ -466,13 +569,21 @@ async fn handle_conn(
         return proxy_static(stream, path, state, "test-media").await;
     }
 
-    // 渲染器诊断上报端点：/diag?msg=<urlencoded>
+    // 渲染器诊断上报端点：/diag?msg=<urlencoded>[&win=<label urlencoded>]
     if path.starts_with("/diag") {
-        let msg = query
-            .strip_prefix("msg=")
-            .map(|m| percent_decode(m))
-            .unwrap_or_default();
-        record_renderer_diag(&state, &msg);
+        let mut msg = String::new();
+        let mut win: Option<String> = None;
+        for kv in query.split('&') {
+            if let Some(v) = kv.strip_prefix("msg=") {
+                msg = percent_decode(v);
+            } else if let Some(v) = kv.strip_prefix("win=") {
+                let s = percent_decode(v);
+                if !s.is_empty() {
+                    win = Some(s);
+                }
+            }
+        }
+        record_renderer_diag(&state, &msg, win.as_deref());
         tracing::warn!("[renderer diag] {msg}");
         return respond(stream, 200, "OK", "text/plain", b"ok", None).await;
     }
@@ -1026,6 +1137,7 @@ mod tests {
             sse_clients: Default::default(),
             wallpaper_ready_ms: Default::default(),
             renderer_diag: Default::default(),
+            label_diag: Default::default(),
         };
 
         let items: Vec<String> = {
@@ -1145,6 +1257,7 @@ mod tests {
             sse_clients: Default::default(),
             wallpaper_ready_ms: Default::default(),
             renderer_diag: Default::default(),
+            label_diag: Default::default(),
         }
     }
 
@@ -1179,14 +1292,14 @@ mod tests {
             0
         );
 
-        record_renderer_diag(&state, "[scene 111] mount start");
+        record_renderer_diag(&state, "[scene 111] mount start", None);
         assert_eq!(
             state.wallpaper_ready_ms.load(std::sync::atomic::Ordering::Relaxed),
             0,
             "mount start 不是 ready，不该动时间戳"
         );
 
-        record_renderer_diag(&state, "[scene 111] ready");
+        record_renderer_diag(&state, "[scene 111] ready", None);
         assert!(
             state.wallpaper_ready_ms.load(std::sync::atomic::Ordering::Relaxed) > 0,
             "ready 必须记时间戳"
@@ -1198,12 +1311,36 @@ mod tests {
             assert!(d.fail_reason.is_empty());
         }
 
-        record_renderer_diag(&state, "[scene 111] failed: scene.pkg 加载失败");
+        record_renderer_diag(&state, "[scene 111] failed: scene.pkg 加载失败", None);
         let d = state.renderer_diag.lock().unwrap();
         assert_eq!(d.fail_reason, "scene.pkg 加载失败");
         assert!(d.fail_ms > 0);
         // 失败不该把「已就绪的条目」清掉（重试同一张时仍可跳过重复挂载）
         assert_eq!(d.ready_item, "111");
+    }
+
+    /// 按 label 分档：多屏并发时两扇页的 ready/failure 互不覆盖
+    #[test]
+    fn label_diag_isolates_windows() {
+        let state = diag_test_state();
+        let t0 = now_epoch_ms();
+        record_renderer_diag(&state, "[scene 111] ready", Some("wallpaper-a"));
+        record_renderer_diag(&state, "[scene 222] ready", Some("wallpaper-b"));
+        assert!(label_ready_since_state(&state, "wallpaper-a", t0, Some("111")));
+        assert!(label_ready_since_state(&state, "wallpaper-b", t0, Some("222")));
+        assert!(
+            !label_ready_since_state(&state, "wallpaper-a", t0, Some("222")),
+            "A 的 ready 不该被 B 的条目覆盖"
+        );
+        assert!(
+            !label_ready_since_state(&state, "wallpaper-c", t0, None),
+            "没上报过的窗口不算 ready"
+        );
+
+        // 失败同样按窗口分档：A 失败不污染 B
+        record_renderer_diag(&state, "[scene 111] failed: pkg 炸了", Some("wallpaper-a"));
+        assert!(label_failure_since_state(&state, "wallpaper-a", t0, Some("111")).is_some());
+        assert!(label_failure_since_state(&state, "wallpaper-b", t0, None).is_none());
     }
 
     /// 随机文件端点的目录挑选逻辑：只挑普通文件、路径相对壁纸根、空目录 None
@@ -1390,6 +1527,7 @@ mod tests {
             sse_clients: Default::default(),
             wallpaper_ready_ms: Default::default(),
             renderer_diag: Default::default(),
+            label_diag: Default::default(),
         };
         let html =
             b"<!DOCTYPE html><html><head><meta charset=utf-8></head><body></body></html>".to_vec();

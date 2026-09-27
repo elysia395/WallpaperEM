@@ -683,7 +683,11 @@ fn already_ready(app: &AppHandle, item_id: &str) -> bool {
         .values()
         .all(|cfg| crate::wallpaper::item_id_of(cfg).as_deref() == Some(item_id));
     drop(windows);
-    all_match && crate::content_server::ready_item(app).as_deref() == Some(item_id)
+    // 换纸还在飞时 windows 里已登记新配置、ready 还是上一张的 —— 都不作数，
+    // 等换纸整体落地再判「已挂在屏上」
+    all_match
+        && crate::content_server::ready_item(app).as_deref() == Some(item_id)
+        && !crate::wallpaper::any_swap_in_flight()
 }
 
 /// 截图自检：可选先应用 → 等渲染就绪 → 实拍 → 可选存 preview.png

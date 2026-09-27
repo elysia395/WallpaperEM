@@ -134,11 +134,15 @@ fn spawn_snapshot_sync(app: &AppHandle, cfg_type: &str, item_id: &str, dir: &Pat
     let app2 = app.clone();
     let ty = cfg_type.to_string();
     tauri::async_runtime::spawn(async move {
-        // 等「新一次」ready：t0 之前的时间戳属于上一张壁纸
+        // 等「新一次」ready：t0 之前的时间戳属于上一张壁纸。
+        // 还要等换纸整体落地 —— 新的 ready 可能早于换纸任务收尾（现役窗还没
+        // 交出控制权），光看时间戳会抢拍。
         let t0 = ready_ms.load(Ordering::Relaxed);
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
         loop {
-            if ready_ms.load(Ordering::Relaxed) > t0 {
+            if ready_ms.load(Ordering::Relaxed) > t0
+                && !crate::wallpaper::any_swap_in_flight()
+            {
                 break;
             }
             if std::time::Instant::now() >= deadline {
@@ -150,7 +154,7 @@ fn spawn_snapshot_sync(app: &AppHandle, cfg_type: &str, item_id: &str, dir: &Pat
         // ready 时首帧刚上屏；再等一拍让场景多渲染几帧，避免截到半成品画面
         tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
 
-        // 无缝切换后现役窗可能是 `-b` 变体：按基 label 过解析层拿现役的那扇
+        // 一屏一窗：按基 label 过解析层拿到那扇窗口
         let Some(window) = crate::wallpaper::wallpaper_window(&app2, &label) else {
             tracing::warn!("system wallpaper: 壁纸窗口 {label} 已不存在，跳过截图");
             return;
@@ -791,7 +795,10 @@ pub async fn capture_wallpaper_png(
         if label.is_none() {
             label = pick_wallpaper_window(app);
         }
-        if ready_ms.load(Ordering::Relaxed) > t0 {
+        // 别拍在换纸半途：ready 可能早于换纸任务收尾，单飞集合腾空才算「画面真的换完了」
+        if ready_ms.load(Ordering::Relaxed) > t0
+            && !crate::wallpaper::any_swap_in_flight()
+        {
             break;
         }
         if std::time::Instant::now() >= deadline {

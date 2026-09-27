@@ -225,15 +225,15 @@ pub const DEFAULT_REVEAL: &str = "fade";
 
 /// 换壁纸收尾等待（毫秒）：等渲染器把切换效果动画走完再收旧窗。渲染器每效果
 /// 的动画时长见 renderer/src/main.ts 的 `REVEAL_MS` 表 —— **两边必须同步改**；
-/// 这里取「动画时长 + 400ms 裕量」（等待偏长没有视觉代价，只是旧窗多持有片刻）。
+/// 这里取「动画时长 + 小裕量」（覆盖 eval 迟滞即可，等待越短连切解锁越快）。
 fn reveal_fx_wait_ms(reveal: &str) -> u64 {
     match reveal {
-        "zoom" | "blur" => 1300 + 400,
-        "depth" => 1400 + 400,
-        "circle" | "slide" => 1200 + 400,
-        "wipe" => 1000 + 400,
-        // fade 与未知值（旧配置/手改 DB）：0.7s 动画 + 裕量
-        _ => 700 + 200,
+        "zoom" | "blur" => 1300 + 100,
+        "depth" => 1400 + 100,
+        "circle" | "slide" => 1200 + 100,
+        "wipe" => 1000 + 100,
+        // fade 与未知值（旧配置/手改 DB）：0.25s 叠化（速度优先）+ 50ms 裕量
+        _ => 250 + 50,
     }
 }
 
@@ -1130,14 +1130,14 @@ fn restore_sessions(app: &AppHandle) {
     tracing::info!("wallpaper sessions restored: {count}");
 }
 
-// ---------- 壁纸窗口 label 双变体（无缝切换） ----------
+// ---------- 壁纸窗口 label ----------
 //
-// 换壁纸走「旧窗保持播放 + 新窗后台就绪后替换」（见 [`seamless_swap`]），同一块屏
-// 同一时刻可能有两扇窗口，label 在两个变体间交替：
+// 一块屏一扇窗口（label = 基 label），换壁纸就是把这扇窗换成新文档
+// （见 [`reload_wallpaper`]）。label 约定：
 //   wallpaper-<display_id>    基 label —— `state.windows` 的规范键、会话表 display_id、
 //                             指针/滚轮派发都用它
-//   wallpaper-<display_id>-b  交替变体（display id 是纯数字，不会自带 -b 后缀）
-// 真实窗口经 [`wallpaper_window`] / [`wallpaper_windows`] 解析到活着的那扇/两扇。
+//   wallpaper-<display_id>-b  历史交替变体（兼容旧版残留窗口时仍认；新代码不再创建）
+// 真实窗口经 [`wallpaper_window`] / [`wallpaper_windows`] 解析。
 
 /// 基 label → 两个候选 label（[基, 交替]）
 fn label_variants(base: &str) -> (String, String) {
@@ -1152,8 +1152,8 @@ fn base_label_of(label: &str) -> Option<String> {
     Some(label.strip_suffix("-b").unwrap_or(label).to_string())
 }
 
-/// 基 label 下所有活着的壁纸窗口（无缝切换期间新旧两扇都在）。
-/// 热更新（eval）与几何更新遍历它，别漏掉正在渐入的新窗。
+/// 基 label 下所有活着的壁纸窗口（单窗架构下至多一扇）。
+/// 热更新（eval）与几何更新遍历它，别漏掉正在加载的那扇。
 fn wallpaper_windows(app: &AppHandle, base: &str) -> Vec<WebviewWindow> {
     let (a, b) = label_variants(base);
     [a, b]
@@ -1162,9 +1162,8 @@ fn wallpaper_windows(app: &AppHandle, base: &str) -> Vec<WebviewWindow> {
         .collect()
 }
 
-/// 基 label 现役的壁纸窗口（存在性判断用；两扇都在时任取其一）。
-/// pub(crate)：系统壁纸抽帧 / MCP 截图按 label 取窗也要过它（无缝切换后
-/// 现役窗可能是 `-b` 变体）。
+/// 基 label 现役的壁纸窗口（存在性判断用；单窗架构下就是那扇）。
+/// pub(crate)：系统壁纸抽帧 / MCP 截图按 label 取窗也要过它。
 pub(crate) fn wallpaper_window(app: &AppHandle, base: &str) -> Option<WebviewWindow> {
     wallpaper_windows(app, base).into_iter().next()
 }
@@ -1230,8 +1229,8 @@ fn ensure_windows_inner(app: &AppHandle, display_asleep: bool) {
     }
 
     // 移除已断开的显示器窗口。按**真实活着的窗口**盘点（而不是 state.windows
-    // 的键）：无缝切换的交替变体 / 进行中的新窗也在场，基 label 不在需求集合
-    // 就整对收掉；屏还在则一律不动（切换半成品由换壁纸任务自己收尾）。
+    // 的键）：换纸进行中的窗口也在场，基 label 不在需求集合就收掉；屏还在则
+    // 一律不动（换纸半成品由换纸任务自己收尾）。
     for (l, w) in app.webview_windows() {
         let Some(base) = base_label_of(&l) else {
             continue;
@@ -1411,19 +1410,22 @@ fn prepare_cfg(app: &AppHandle, cfg: &WallpaperConfig) -> WallpaperConfig {
 /// 端口就绪（进程内绝大多数时刻）直接按当前端口拼；未就绪（启动早期，内容
 /// 服务器还没绑定）就沿用当前窗口的 scheme/host，只换路径与 query —— 那种
 /// 情况下窗口本身也是用 `WebviewUrl::App(..)` 建的，同源换页即可。
+/// `win` = 目标窗口 label（渲染器 /diag 分档用），从窗口句柄直接取。
 fn renderer_url(
     app: &AppHandle,
     window: Option<&WebviewWindow>,
     cfg: &WallpaperConfig,
 ) -> Result<url::Url, String> {
+    let win = window.map(|w| w.label()).unwrap_or("");
     if let Some(port) = content_port(app) {
         return renderer_url_on(
             &format!("http://127.0.0.1:{port}"),
             cfg,
             content_token(app).as_deref(),
+            win,
         );
     }
-    let query = config_query_with_audio(cfg, content_token(app).as_deref());
+    let query = config_query_with_audio(cfg, content_token(app).as_deref(), win);
     let mut url = window
         .ok_or("内容服务器端口未就绪")?
         .url()
@@ -1437,20 +1439,21 @@ fn renderer_url(
 ///
 /// 建窗与换壁纸整页导航共用这一份，只差一个 origin：**query 必须逐字段一致**。
 /// 渲染器的全部壁纸配置都取自 URL query（`renderer/src/main.ts` 的 `initialCfg`），
-/// 少一个字段就是「换了壁纸但设置没跟着换」。
+/// 少一个字段就是「换了壁纸但设置没跟着换」。`win` 是窗口 label（/diag 分档）。
 fn renderer_url_on(
     origin: &str,
     cfg: &WallpaperConfig,
     audio_token: Option<&str>,
+    win: &str,
 ) -> Result<url::Url, String> {
-    let query = config_query_with_audio(cfg, audio_token);
+    let query = config_query_with_audio(cfg, audio_token, win);
     format!("{origin}/renderer/index.html{query}")
         .parse::<url::Url>()
         .map_err(|e| format!("无效的渲染器 URL: {e}"))
 }
 
 /// 在既有壁纸窗口里**整页导航**到新配置（非 macOS 的换壁纸走这条路；macOS 的
-/// 取舍见 [`new_data_store_id`]）。与热更新 `setWallpaper` 的区别是
+/// 取舍见 [`reload_wallpaper`]）。与热更新 `setWallpaper` 的区别是
 /// 换的是文档：旧页面的 `pagehide` teardown 会跑完（销毁库实例、释放 pkg 缓存、
 /// `loseContext`、撤销 blob），WebKit 随文档销毁一并回收 GPU 侧资源。
 fn navigate_to_config(
@@ -1463,25 +1466,27 @@ fn navigate_to_config(
     window.navigate(url).map_err(|e| e.to_string())
 }
 
+/// 建壁纸窗口（URL 自带完整配置，页面开机即挂载）。
 fn create_desktop_window(
     app: &AppHandle,
     label: &str,
     cfg: &WallpaperConfig,
     frame: (f64, f64, f64, f64),
 ) -> Result<WebviewWindow, String> {
-    let cfg = prepare_cfg(app, cfg);
-    // 渲染器页与媒体同源（内容服务器），消除跨源 fetch 限制
+    let prepared = prepare_cfg(app, cfg);
+    // 渲染器页与媒体同源（内容服务器），消除跨源 fetch 限制；win=label 供 /diag 分档
     let url = if let Some(port) = content_port(app) {
         WebviewUrl::External(renderer_url_on(
             &format!("http://127.0.0.1:{port}"),
-            &cfg,
+            &prepared,
             content_token(app).as_deref(),
+            label,
         )?)
     } else {
-        let query = config_query_with_audio(&cfg, content_token(app).as_deref());
+        let query = config_query_with_audio(&prepared, content_token(app).as_deref(), label);
         WebviewUrl::App(format!("renderer/index.html{query}").into())
     };
-    tracing::info!("create_window[{label}]: 开始建窗（type={}）", cfg.r#type);
+    tracing::info!("create_window[{label}]: 开始建窗（type={}）", prepared.r#type);
     let build_started = std::time::Instant::now();
     // macOS：每块壁纸窗口独占一份 WKWebsiteDataStore，窗口销毁时才有机会连带
     // 回收它的 WebContent 进程，详见 [`new_data_store_id`]。其它平台该 builder
@@ -1551,7 +1556,7 @@ fn create_desktop_window(
     // 按既有经验「show 之后重设层级 + orderFrontRegardless」，show 后再 apply
     // 一次（幂等），此时窗口已可见，遮挡态与合成层级都被矫正。
     platform::apply_desktop_window(&window, frame, current_interactive(app));
-    tracing::info!("wallpaper window {label} created: {cfg:?}");
+    tracing::info!("wallpaper window {label} created: {prepared:?}");
     crate::mem_watch::report("新建壁纸窗口");
     // ⚠️ 只在 Windows 上做「延迟重挂」：新建的窗口是「从未显示过」的状态，此时直接
     // 挂到 Win11 的 raised-desktop 层实测不生效（壁纸被原生壁纸盖住）；而手动开一次
@@ -1594,16 +1599,26 @@ fn create_desktop_window(
 static RELOADING: std::sync::OnceLock<Mutex<std::collections::HashSet<String>>> =
     std::sync::OnceLock::new();
 
+/// 任一屏的换纸是否还在进行中（截图/系统壁纸抽帧用它等「画面真的换完了」）。
+/// 换纸期间窗口里是新文档的加载过程（旧画面已被换掉），只看 ready 时间戳不够。
+pub(crate) fn any_swap_in_flight() -> bool {
+    RELOADING
+        .get()
+        .and_then(|s| s.lock().ok())
+        .is_some_and(|g| !g.is_empty())
+}
+
 /// 换壁纸（防抖 + 单飞）：连切时等目标稳定后只加载最后一张。
 ///
-/// 所有平台统一走**无缝切换**（[`seamless_swap`]）：旧窗保持播放、新窗后台加载，
-/// 首帧 ready 后渐入、渐入走完再收旧窗 —— 慢加载的壁纸不再露出加载空白，加载
-/// 失败时旧壁纸继续留在屏上。就地导航 / 先销毁后重建都会立刻抹掉旧画面，做不到
-/// 无缝（macOS 就地导航在重内容页上还会冻死，见 [`destroy_wallpaper_window`]）。
+/// 一屏一窗：把这块屏**唯一**的壁纸窗口换成新文档（[`reload_wallpaper`]），
+/// 不建第二扇窗口、更不预热 —— 渲染实例与 WebContent 进程永远只有一份。
+/// 代价是加载期间屏上露出桌面（系统壁纸）；换来的是内存零累积、没有双窗
+/// 遮挡/黑闪那一整类问题。
 fn schedule_window_reload(app: &AppHandle, label: &str, frame: (f64, f64, f64, f64)) {
     use std::time::Duration;
-    /// 连切合并窗口：目标稳定这么久才动手
-    const DEBOUNCE: Duration = Duration::from_millis(350);
+    /// 连切合并窗口：目标稳定这么久才动手。速度优先 —— 单次切换只付这一段固定
+    /// 延迟；连切由收敛循环的 Superseded 吸收，这里只挡按键连发/事件风暴。
+    const DEBOUNCE: Duration = Duration::from_millis(80);
 
     let set = RELOADING.get_or_init(|| Mutex::new(std::collections::HashSet::new()));
     {
@@ -1638,7 +1653,7 @@ fn schedule_window_reload(app: &AppHandle, label: &str, frame: (f64, f64, f64, f
             last = Some(cur);
             tokio::time::sleep(DEBOUNCE).await;
         }
-        // 收敛循环：无缝切换期间目标又变（连切）→ 作废本次、换最新目标再切一轮
+        // 收敛循环：换纸期间目标又变（连切）→ 作废本次、换最新目标再换一轮
         loop {
             // 「暂停释放内存」挂起期间不加载：配置已登记进 state.windows，
             // 恢复播放时按最新配置整窗重建；轮播也不该在后台把渲染进程建回来
@@ -1650,9 +1665,9 @@ fn schedule_window_reload(app: &AppHandle, label: &str, frame: (f64, f64, f64, f
                 done();
                 return;
             };
-            match seamless_swap(&app, &label, frame, &target).await {
+            match reload_wallpaper(&app, &label, frame, &target).await {
                 SwapOutcome::Swapped => {
-                    crate::mem_watch::report("换壁纸（无缝切换）");
+                    crate::mem_watch::report("换壁纸（单窗换文档）");
                     if current(&app).is_some_and(|c| same_wallpaper(&c, &target)) {
                         done();
                         return;
@@ -1660,10 +1675,10 @@ fn schedule_window_reload(app: &AppHandle, label: &str, frame: (f64, f64, f64, f
                     // 收尾瞬间又切了新目标：继续收敛
                 }
                 SwapOutcome::Superseded => {
-                    // 半成品已由 seamless_swap 回收，直接换最新目标重来
+                    // 新目标已登记，直接换最新目标重来（半成品由 reload_wallpaper 自愈）
                 }
                 SwapOutcome::KeptOld(reason) => {
-                    tracing::warn!("wallpaper {label}: 未切换（{reason}），旧壁纸继续留在屏上");
+                    tracing::warn!("wallpaper {label}: 换纸未成功（{reason}）");
                     let _ = app.emit(
                         "wallpaper-load-failed",
                         serde_json::json!({ "label": label, "reason": reason }),
@@ -1676,27 +1691,44 @@ fn schedule_window_reload(app: &AppHandle, label: &str, frame: (f64, f64, f64, f
     });
 }
 
-/// 无缝切换的结果
+/// 换纸的结果
 enum SwapOutcome {
-    /// 新窗已就绪并完成渐入，旧窗已收掉
+    /// 新文档已就绪（首帧已上报）
     Swapped,
-    /// 切换目标被更新的配置取代（本次的半成品新窗已回收）
+    /// 换纸目标被更新的配置取代（调用方换最新目标重来）
     Superseded,
-    /// 新壁纸没准备好（加载失败等），旧壁纸留在屏上
+    /// 新壁纸没能就绪（加载失败 / 挂起中 / 超时前消失）
     KeptOld(String),
 }
 
-/// 无缝切换一块屏的壁纸：旧窗保持播放，新窗后台加载，首帧 ready 后渐入、
-/// 渐入走完再收旧窗（视觉上是叠化，不是跳变）。
+/// epoch 毫秒（ready/failed 的时间下界）
+fn now_epoch_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+/// 换壁纸（一屏一窗）：把这块屏那扇**唯一**的壁纸窗口换成新文档，等首帧落地。
 ///
-/// - 首帧信号复用截图那套：渲染器 mount 到首帧才报 `ready`（/diag 回流），
-///   大 scene.pkg 冷启动 30s+ 也不误判（[`renderer_ready_since`]）；
-/// - 加载失败（渲染器报 `failed:`）→ 销毁新窗、返回 [`SwapOutcome::KeptOld`]，
-///   旧壁纸留在屏上 —— 「资源没准备好前，继续上一张」的语义就落在这条分支；
-/// - 等待期间目标又被改掉（连切）→ 销毁新窗、返回 [`SwapOutcome::Superseded`]；
-/// - 渐入由渲染器页面自己完成（wrap opacity 0→1，0.7s），宿主等它走完才收旧窗；
-///   收旧窗前先把旧窗音量归零，避免叠化期间双声重叠。
-async fn seamless_swap(
+/// 平台两条路（同一时刻只有一扇窗口、一个渲染实例）：
+/// - macOS：销毁旧窗口（[`destroy_wallpaper_window`] 显式结束它的 WebContent
+///   进程，内存实打实归还）→ 等 label 让位 → 同名重建。就地导航在重内容页上
+///   回收不可靠、会冻死（见 apply_on_main 的实测注释）。
+/// - 非 macOS：同窗口整页导航（WebView2 / WebKitGTK 的导航连带销毁旧文档），
+///   导航失败兜底销毁重建。
+///
+/// 与旧「双窗无缝切换」的差别：没有第二扇窗口承载旧画面，换纸期间屏上露出
+/// 桌面（系统壁纸）—— 这是「一屏一进程、内存零累积」的代价。加载提速全部保留：
+/// 防抖 80ms、33ms 快轮询、首帧即显形（渲染器侧 0.25s 叠化，见 REVEAL_MS）。
+///
+/// - 首帧/失败按**自己的 label** 记账（/diag 的 `win` 分档）：多屏并发时全局
+///   单槽会互相覆盖；
+/// - 加载失败（渲染器报 `failed:`）→ 渲染器已挂降级页兜底，这里返回
+///   [`SwapOutcome::KeptOld`]，由调用方通知 UI；
+/// - 等待期间目标又被改掉（连切）→ [`SwapOutcome::Superseded`]，调用方换最新
+///   目标再来一轮；会话被清（stop）→ 收掉刚建的窗并返回。
+async fn reload_wallpaper(
     app: &AppHandle,
     base: &str,
     frame: (f64, f64, f64, f64),
@@ -1704,119 +1736,162 @@ async fn seamless_swap(
 ) -> SwapOutcome {
     use std::time::Duration;
     /// 等首帧上限。渲染器自身的 90s 硬兜底会先报 failed（见 mountViaLib），
-    /// 这里多留一拍只作最后防线 —— 播着旧壁纸远好过换上一张空白。
+    /// 这里多留一拍只作最后防线。
     const READY_TIMEOUT: Duration = Duration::from_secs(95);
 
     if label_released(app, base) {
         return SwapOutcome::KeptOld("「暂停释放内存」挂起中".into());
     }
-    // 起点先于建窗：ready/failed 时间戳要「晚于它」才算本次的结果
-    let t0 = crate::system_wallpaper::ready_stamp(app);
     let item = item_id_of(target);
+    let t_begin = std::time::Instant::now();
+    // 换纸前的 ready/failed 都不算数（时间下界）。macOS 那条路会销毁窗口、由
+    // destroy 清掉本 label 的分档；时间下界给导航/重建两条路兜底。
+    let since = now_epoch_ms();
 
-    // 双变体交替占 label：旧窗在基 label 就让新窗去 `-b`，反之亦然；
-    // 旧窗不在（首次应用）时新窗直接占基 label，没有旧窗可保。
-    let old = wallpaper_window(app, base);
-    let (va, vb) = label_variants(base);
-    let incoming = match &old {
-        Some(w) => {
-            if w.label() == va {
-                vb
-            } else {
-                va
-            }
-        }
-        None => va,
-    };
-
-    // 主线程建新窗（透明窗口；渲染器页面 opacity 0 起步，就绪后渐入）
-    let created = {
-        let (tx, rx) = std::sync::mpsc::channel();
-        let app2 = app.clone();
-        let incoming2 = incoming.clone();
-        let target2 = target.clone();
-        let _ = app.run_on_main_thread(move || {
-            let r = create_desktop_window(&app2, &incoming2, &target2, frame).map(|_| ());
-            let _ = tx.send(r);
-        });
-        rx.recv_timeout(Duration::from_secs(5))
-            .unwrap_or_else(|_| Err("建窗超时".into()))
-    };
-    if let Err(e) = created {
-        return SwapOutcome::KeptOld(format!("新窗口创建失败：{e}"));
+    if let Err(e) = swap_window_document(app, base, frame, target).await {
+        return SwapOutcome::KeptOld(e);
     }
 
-    // 等首帧 / 失败 / 目标变更 / 超时
+    // 等首帧 / 失败 / 目标变更 / 释放 / 超时（先查后睡，33ms 快轮询）
     let start = std::time::Instant::now();
+    let mut forced = false;
     loop {
-        tokio::time::sleep(Duration::from_millis(200)).await;
-        // 目标被取代（含 stop 清会话）：回收半成品，交给调用方换最新目标
-        let superseded = app
+        // 目标被取代（含 stop 清会话）→ 交回调用方；会话已清则把刚建的窗收掉
+        let session = app
             .try_state::<WallpaperEngineState>()
-            .and_then(|st| st.windows.lock().unwrap().get(base).cloned())
-            .map(|c| !same_wallpaper(&c, target))
-            .unwrap_or(true);
-        if superseded {
-            destroy_incoming(app, &incoming);
-            return SwapOutcome::Superseded;
+            .and_then(|st| st.windows.lock().unwrap().get(base).cloned());
+        match session {
+            None => {
+                destroy_base_windows(app, base);
+                return SwapOutcome::KeptOld("会话已清（停止壁纸）".into());
+            }
+            Some(c) if !same_wallpaper(&c, target) => return SwapOutcome::Superseded,
+            Some(_) => {}
         }
-        if let Some(reason) = crate::content_server::failure_since(app, t0, item.as_deref()) {
-            destroy_incoming(app, &incoming);
+        // 「暂停释放内存」挂起：释放语义就是「这扇窗不该在场」——收掉刚建的窗
+        if label_released(app, base) {
+            destroy_base_windows(app, base);
+            return SwapOutcome::KeptOld("「暂停释放内存」挂起中".into());
+        }
+        if wallpaper_windows(app, base).is_empty() {
+            return SwapOutcome::KeptOld("壁纸窗口在加载中消失".into());
+        }
+        if let Some(reason) =
+            crate::content_server::label_failure_since(app, base, since, item.as_deref())
+        {
             return SwapOutcome::KeptOld(reason);
         }
-        if renderer_ready_since(app, t0, item.as_deref()) {
+        if crate::content_server::label_ready_since(app, base, since, item.as_deref()) {
             break;
         }
         if start.elapsed() > READY_TIMEOUT {
             tracing::warn!(
-                "wallpaper {base}: 等首帧超时（{}s），强制替换",
+                "wallpaper {base}: 等首帧超时（{}s），按现状收尾",
                 READY_TIMEOUT.as_secs()
             );
+            forced = true;
             break;
         }
+        tokio::time::sleep(Duration::from_millis(33)).await;
     }
+    let wait_ms = start.elapsed().as_millis();
 
-    // 渐入收尾：旧窗先收音量，等切换效果动画走完再销毁，叠化过渡
-    if let Some(w) = &old {
-        let _ = w.eval("window.__wp && window.__wp.setVolume(0)");
-    }
-    tokio::time::sleep(Duration::from_millis(reveal_fx_wait_ms(&target.reveal))).await;
-    if let Some(w) = old {
-        if app.get_webview_window(w.label()).is_some() {
-            destroy_wallpaper_window(app, &w);
-        }
-    }
+    // 切换效果收尾：新文档由页面自己从透明渐入（渲染器 reveal()，时长见
+    // REVEAL_MS），等动画走完才算「换完了」—— 截图与系统壁纸抽帧靠
+    // RELOADING 也等这一下。时长表与渲染器两侧同步改。
+    let reveal_wait = reveal_fx_wait_ms(&target.reveal);
+    tokio::time::sleep(Duration::from_millis(reveal_wait)).await;
+
     // 换纸不改变播放状态：全局手动暂停 / 本屏自动暂停挂起中，把新页压回暂停
-    // （新窗加载完默认播放；首帧已 ready，此时 eval 一定落在页面脚本之后）
     let keep_paused = app
         .try_state::<WallpaperEngineState>()
-        .map(|st| {
-            *st.paused.lock().unwrap() || st.auto_paused.lock().unwrap().contains(base)
-        })
+        .map(|st| *st.paused.lock().unwrap() || st.auto_paused.lock().unwrap().contains(base))
         .unwrap_or(false);
     if keep_paused {
-        if let Some(w) = app.get_webview_window(&incoming) {
+        if let Some(w) = app.get_webview_window(base) {
             let _ = w.eval("window.__wp && window.__wp.pause()");
         }
     }
+    tracing::info!(
+        "wallpaper {base}: 换纸完成（总 {}ms = 等首帧 {}ms + 显形 {}ms{}）",
+        t_begin.elapsed().as_millis(),
+        wait_ms,
+        reveal_wait,
+        if forced { "，首帧超时" } else { "" }
+    );
     SwapOutcome::Swapped
 }
 
-/// 半成品新窗回收（中止 / 被取代时）
-fn destroy_incoming(app: &AppHandle, label: &str) {
-    if let Some(w) = app.get_webview_window(label) {
+/// 把 base 那扇窗口的文档换成 target（平台取舍见 [`reload_wallpaper`]）。
+async fn swap_window_document(
+    app: &AppHandle,
+    base: &str,
+    frame: (f64, f64, f64, f64),
+    target: &WallpaperConfig,
+) -> Result<(), String> {
+    let existing = wallpaper_window(app, base);
+    // macOS：销毁（结束 WebContent 进程）→ 同名重建。就地方案在重内容页上
+    // 回收不可靠，会冻死（见 apply_on_main 注释）；重建窗口即进程数恒定。
+    if cfg!(target_os = "macos") {
+        if let Some(w) = existing {
+            destroy_wallpaper_window(app, &w);
+            wait_label_free(app, base).await;
+        }
+        return create_window_on_main(app, base, frame, target);
+    }
+    match existing {
+        // 非 macOS：同窗口整页导航（导航会连带销毁旧文档，旧页 pagehide 跑完
+        // teardown），导航失败才回退销毁重建
+        Some(w) => match navigate_to_config(app, &w, target) {
+            Ok(()) => Ok(()),
+            Err(e) => {
+                tracing::warn!("wallpaper {base}: 整页导航失败（{e}），回退销毁重建");
+                destroy_wallpaper_window(app, &w);
+                wait_label_free(app, base).await;
+                create_window_on_main(app, base, frame, target)
+            }
+        },
+        None => create_window_on_main(app, base, frame, target),
+    }
+}
+
+/// 主线程建窗（建窗 API 只能在主线程调）。配置已在 `state.windows` 里，
+/// 窗口本身的会话登记由换纸完成后的常规流程负责（见 apply_on_main）。
+fn create_window_on_main(
+    app: &AppHandle,
+    base: &str,
+    frame: (f64, f64, f64, f64),
+    target: &WallpaperConfig,
+) -> Result<(), String> {
+    use std::time::Duration;
+    let (tx, rx) = std::sync::mpsc::channel();
+    let app2 = app.clone();
+    let label = base.to_string();
+    let cfg = target.clone();
+    let _ = app.run_on_main_thread(move || {
+        let r = create_desktop_window(&app2, &label, &cfg, frame).map(|_| ());
+        let _ = tx.send(r);
+    });
+    rx.recv_timeout(Duration::from_secs(5))
+        .unwrap_or_else(|_| Err("建窗超时".into()))
+}
+
+/// 收掉 base 名下的壁纸窗口（会话已清 / 释放挂起时把半成品一并收干净）
+fn destroy_base_windows(app: &AppHandle, base: &str) {
+    for w in wallpaper_windows(app, base) {
         destroy_wallpaper_window(app, &w);
     }
 }
 
-/// 新壁纸首帧是否就绪：ready 时间戳不早于 t0，且归属目标条目（None = 不校验归属）。
-fn renderer_ready_since(app: &AppHandle, t0: u64, item: Option<&str>) -> bool {
-    if crate::system_wallpaper::ready_stamp(app) < t0 {
-        return false;
-    }
-    match item {
-        Some(want) => crate::content_server::ready_item(app).as_deref() == Some(want),
-        None => true,
+/// 等指定 label 的窗口让位（销毁是异步的；建窗撞 label 会失败）
+async fn wait_label_free(app: &AppHandle, label: &str) {
+    let deadline = std::time::Instant::now() + Duration::from_secs(6);
+    while app.get_webview_window(label).is_some() {
+        if std::time::Instant::now() >= deadline {
+            tracing::warn!("wait_label_free[{label}]: 6s 未让位，继续尝试建窗");
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(33)).await;
     }
 }
 
@@ -1863,6 +1938,10 @@ fn destroy_wallpaper_window(app: &AppHandle, window: &WebviewWindow) {
     let w = window.clone();
     let app = app.clone();
     let label = w.label().to_string();
+    // 诊断分档同步清掉（赶在任何异步/取消分支之前）：下一个复用这个 label 的
+    // 窗口不能读到上一任的旧 ready/boot —— 同名重建后误判「已就绪」会让换纸
+    // 抢跑，截图也会拍下上一张。
+    crate::content_server::clear_label_diag(&app, &label);
     // 标识必须**在这一刻**取出并摘掉：紧接着的同名重建会往同一个 label 写入新
     // 标识，异步回收再按 label 查就会拿到新窗口那份，把刚建好的壁纸的存储删掉。
     let mut store = app
@@ -2020,7 +2099,8 @@ fn restore_data_store(app: &AppHandle, label: &str, store: Option<[u8; 16]>) {
 
 /// 非 macOS：直接销毁（见 [`destroy_wallpaper_window`] 的说明）
 #[cfg(not(target_os = "macos"))]
-fn destroy_wallpaper_window(_app: &AppHandle, window: &WebviewWindow) {
+fn destroy_wallpaper_window(app: &AppHandle, window: &WebviewWindow) {
+    crate::content_server::clear_label_diag(app, window.label());
     let _ = window.destroy();
 }
 
@@ -2170,10 +2250,10 @@ fn apply_on_main(
         // 305M→3085M），切到轻量视频也不回落。热更新换的是实例不是文档，回收
         // 全靠库自觉。
         //
-        // 换壁纸（[`schedule_window_reload`]）按平台分两条路（见该函数注释）：
-        //   - 非 macOS：同窗口整页导航 —— WebView2 / WebKitGTK 会连带销毁旧文档
-        //   - macOS：销毁旧窗口（结束 WebContent 进程）→ 同名重建 —— 就地导航在
-        //     重内容页上回收不可靠、会冻死
+        // 换壁纸统一走单窗换文档（[`schedule_window_reload`] → [`reload_wallpaper`]）：
+        // 这一扇窗的**文档**被换掉（macOS 销毁重建 / 其它平台整页导航），旧文档的
+        // pagehide teardown 跑完（销毁库实例、释放 pkg 缓存、loseContext），
+        // 上面那个泄漏没有土壤；同一时刻屏上只有一扇窗、一个渲染实例。
         //
         // 同一条目改 fit / dpr / fps / 属性时 item 不变 → 仍走热更新，不换页。
         let switched = state
@@ -2582,7 +2662,8 @@ fn spawn_force_reload(app: AppHandle) {
                 refresh_src(&app, &mut cfg);
                 let item = item_id_of(&cfg);
                 apply_play_config(&app, &mut cfg, item.as_deref());
-                let query = config_query_with_audio(&cfg, content_token(&app).as_deref());
+                let query =
+                    config_query_with_audio(&cfg, content_token(&app).as_deref(), w.label());
                 if let Some(port) = app
                     .try_state::<Arc<Mutex<u16>>>()
                     .and_then(|p| p.lock().ok().map(|g| *g))
@@ -2614,8 +2695,12 @@ fn url_encode(s: &str) -> String {
 
 /// 渲染器 URL 的 query。`audio_token` 非空时渲染器会订阅 /audio-stream SSE，
 /// 把系统音频频谱注入库（scene 与 web 壁纸共用同一份数据）。
-fn config_query_with_audio(cfg: &WallpaperConfig, audio_token: Option<&str>) -> String {
+/// `win` = 窗口 label：渲染器 /diag 带上它，Rust 侧按 label 分档记 ready/failed。
+fn config_query_with_audio(cfg: &WallpaperConfig, audio_token: Option<&str>, win: &str) -> String {
     let mut parts = vec![format!("type={}", url_encode(&cfg.r#type))];
+    if !win.is_empty() {
+        parts.push(format!("win={}", url_encode(win)));
+    }
     if let Some(src) = &cfg.src {
         parts.push(format!("src={}", url_encode(src)));
     }
@@ -2749,7 +2834,7 @@ pub fn stop(app: AppHandle, display_id: Option<String>) -> Result<(), String> {
         };
         let db = app2.try_state::<Arc<Mutex<rusqlite::Connection>>>();
         for label in &labels {
-            // 两扇都收（无缝切换的基/交替变体可能同时在场）
+            // 按真实活着的窗口收（换纸进行中的那扇也在这里）
             for w in wallpaper_windows(&app2, label) {
                 destroy_wallpaper_window(&app2, &w);
             }
@@ -5041,15 +5126,15 @@ mod tests {
     }
 
     /// 收尾等待覆盖渲染器动画时长（REVEAL_MS 同步表见 renderer/src/main.ts）：
-    /// 非 fade 档 = 动画 + 400ms 裕量；fade/未知值走旧 0.7s+200ms。
+    /// 非 fade 档 = 动画 + 100ms 裕量；fade/未知值 = 0.25s 叠化 + 50ms（速度优先）。
     #[test]
     fn reveal_wait_matches_renderer_durations() {
-        assert_eq!(reveal_fx_wait_ms("fade"), 900);
-        assert_eq!(reveal_fx_wait_ms("wipe"), 1400);
-        assert_eq!(reveal_fx_wait_ms("circle"), 1600);
-        assert_eq!(reveal_fx_wait_ms("zoom"), 1700);
-        assert_eq!(reveal_fx_wait_ms("depth"), 1800);
-        assert_eq!(reveal_fx_wait_ms("不存在"), 900);
+        assert_eq!(reveal_fx_wait_ms("fade"), 300);
+        assert_eq!(reveal_fx_wait_ms("wipe"), 1100);
+        assert_eq!(reveal_fx_wait_ms("circle"), 1300);
+        assert_eq!(reveal_fx_wait_ms("zoom"), 1400);
+        assert_eq!(reveal_fx_wait_ms("depth"), 1500);
+        assert_eq!(reveal_fx_wait_ms("不存在"), 300);
     }
 
     /// 渲染器 URL 的契约：换壁纸走的就是「导航到这个 URL」，所以**渲染器的
@@ -5076,8 +5161,11 @@ mod tests {
             scene_pkg: Some("scenes/my.pkg".into()),
             local_assets: true,
             media_base: Some("http://127.0.0.1:1/media/tok".into()),
+            video_tex_scale: 0.0,
         };
-        let url = renderer_url_on("http://127.0.0.1:57810", &cfg, Some("audiotok")).unwrap();
+        let url =
+            renderer_url_on("http://127.0.0.1:57810", &cfg, Some("audiotok"), "wallpaper-1")
+                .unwrap();
         assert_eq!(
             url[..url::Position::BeforePath].to_string(),
             "http://127.0.0.1:57810",

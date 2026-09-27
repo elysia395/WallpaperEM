@@ -158,15 +158,16 @@ const wrap: HTMLDivElement = (() => {
   const el = document.createElement("div");
   el.id = "wrap";
   el.style.cssText =
-    "position:fixed;inset:0;overflow:hidden;background:#000;opacity:0;transition:opacity .7s ease;";
+    "position:fixed;inset:0;overflow:hidden;background:#000;opacity:0;transition:opacity .25s ease;";
   document.body.appendChild(el);
   return el;
 })();
 
 /**
- * 首帧就绪后显形（0.7s）。整页生命周期只显形一次：同一窗口内的热更新
- * （setWallpaper 重挂）不该反复淡入淡出。无缝切换的宿主侧在 ready 后等显形
- * 走完才收旧窗，视觉上是「切换效果」而不是跳变。
+ * 首帧就绪后显形（0.25s，速度优先 —— 时长表与宿主 reveal_fx_wait_ms 同步）。
+ * 整页生命周期只显形一次：同一窗口内的热更新（setWallpaper 重挂）不该反复
+ * 淡入淡出。换纸时宿主等它走完才算「换完了」（截图/系统壁纸抽帧靠宿主侧
+ * RELOADING 等这一下）。
  */
 let revealed = false;
 function reveal() {
@@ -183,11 +184,12 @@ function reveal() {
 // 关键帧（transform / filter / clip-path），结束后**写回内联终态再 cancel** ——
 // fill 若留在元素上会永久盖住 style.filter（全局滤镜）等内联改动，cancel 让
 // 关键帧彻底放手、由内联样式接管。
-// 时长按效果单独定：叠化是旧有行为保持 0.7s；位移/裁剪/模糊类必须 1s+ 才能
-// 「看清」——动作与淡入同时发生，时长太短就只剩隐约一顿（实测反馈）。宿主
-// 收旧窗的等待见 wallpaper::reveal_fx_wait_ms，与这份表**必须同步改**。
+// 时长按效果单独定：叠化 0.25s（速度优先，切换越快越不打断注意力）；位移/裁剪/
+// 模糊类必须 1s+ 才能「看清」——动作与淡入同时发生，时长太短就只剩隐约一顿
+// （实测反馈）。宿主收旧窗的等待见 wallpaper::reveal_fx_wait_ms，与这份表
+// **必须同步改**。
 const REVEAL_MS: Record<string, number> = {
-  fade: 700,
+  fade: 250,
   zoom: 1300,
   blur: 1300,
   depth: 1400,
@@ -1023,11 +1025,16 @@ function shareSubscribeProps(token: string | null): void {
     doc.addEventListener("contextmenu", block, true);
 })();
 
+/** 本窗口 label（建窗时宿主经 query 注入）：/diag 带上它，Rust 侧按 label 分档记
+ * ready/failure —— 多屏并发时全局单槽会互相覆盖 */
+const WIN_LABEL = new URLSearchParams(location.search).get("win") ?? "";
+
 /** 诊断上报：转发到内容服务器的 /diag，由 Rust 侧记进日志 */
 function reportDiag(cfg: WallpaperConfig, msg: string) {
   const text = `[${cfg.type}${cfg.src ? ` ${cfg.src}` : ""}] ${msg}`;
   try {
-    void fetch(`/diag?msg=${encodeURIComponent(text)}`, { cache: "no-store" });
+    const win = WIN_LABEL ? `&win=${encodeURIComponent(WIN_LABEL)}` : "";
+    void fetch(`/diag?msg=${encodeURIComponent(text)}${win}`, { cache: "no-store" });
   } catch {
     /* 上报失败不影响渲染 */
   }
@@ -1857,8 +1864,8 @@ function mountDefaultWallpaper() {
     '<div style="text-align:center">壁纸无法加载' +
     '<br><span style="opacity:.55">Wallpaper unavailable</span></div>';
   wrap.appendChild(box);
-  // 降级页只是「别让窗口空着」的兜底，**不报 ready**（无缝切换据此把旧壁纸
-  // 留在屏上，而不是换成一张错误占位图）；但仍要显形，本窗口没有旧壁纸可看时可见。
+  // 降级页只是「别让窗口空着」的兜底，**不报 ready**：宿主据此判定这次换纸失败
+  // （见 reload_wallpaper 的 label_failure_since 分支），而不是当成一张挂好了的壁纸
   reveal();
 }
 
@@ -2081,6 +2088,9 @@ if (audioToken) {
   // 拿不到系统媒体时下发 hasMedia:false，壁纸显示空态而不是库的假数据
   systemMedia.connect(audioToken, (m) => reportDiag(initialCfg, m));
 }
+
+// 页面脚本已跑完（__wp 已可用）：给宿主报一次开机信号（日志/诊断用）
+reportDiag(initialCfg, "boot");
 
 // 分享域挂载走 bootstrap（加载层 + 主资源预取）；桌面壁纸窗口直接挂载，
 // 零额外开销
