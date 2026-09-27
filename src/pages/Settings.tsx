@@ -165,6 +165,9 @@ export function SettingsPage() {
   const [dlUser, setDlUser] = useState("");
   const [dlPass, setDlPass] = useState("");
   const [credMsg, setCredMsg] = useState("");
+  // 并行下载数（网络与服务页；1..=6，默认 3，后端调度热读）
+  const [dlParallel, setDlParallel] = useState(3);
+
   // 代理
   const [proxy, setProxy] = useState("");
   const [proxyMsg, setProxyMsg] = useState("");
@@ -299,6 +302,12 @@ export function SettingsPage() {
     invoke<string | null>("settings_get", { key: "download_proxy" })
       .then((p) => setProxy(p ?? ""))
       .catch(() => { });
+    invoke<string | null>("settings_get", { key: "download_parallel" })
+      .then((v) => {
+        const n = v == null ? NaN : Number(v);
+        setDlParallel(Number.isFinite(n) ? Math.min(6, Math.max(1, Math.round(n))) : 3);
+      })
+      .catch(() => {});
   }, []);
 
   // 共享设置被其它入口改了（托盘菜单 / MCP）：控件值跟上，避免两边状态不一致。
@@ -556,6 +565,14 @@ export function SettingsPage() {
     } catch (e) {
       setProxyMsg(String(e));
     }
+  };
+
+  // 并行下载数：失焦/回车即存，后端下一轮调度即生效（无需重启）
+  const saveParallel = (raw: string) => {
+    const n = Number(raw);
+    const v = Number.isFinite(n) ? Math.min(6, Math.max(1, Math.round(n))) : 3;
+    setDlParallel(v);
+    void invoke("settings_set", { key: "download_parallel", value: String(v) }).catch(() => {});
   };
 
   const toggleFollowSystemProxy = async () => {
@@ -1495,6 +1512,31 @@ export function SettingsPage() {
                   </button>
                   {proxyMsg && <span className="text-[12px] text-[var(--text-2)]">{proxyMsg}</span>}
                 </div>
+              </Group>
+
+              <Group title={tr("下载")}>
+                <Row
+                  label={tr("并行下载数")}
+                  desc={tr(
+                    "同时下载的壁纸数量（1-6，默认 3）。改动立即生效；Steam 同账号并发登录受限时，失败任务会自动重试",
+                  )}
+                  control={
+                    <input
+                      type="number"
+                      min={1}
+                      max={6}
+                      step={1}
+                      value={dlParallel}
+                      onChange={(e) => setDlParallel(e.target.value === "" ? 1 : Number(e.target.value))}
+                      onBlur={(e) => saveParallel(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                        e.stopPropagation();
+                      }}
+                      className="w-16 rounded-md border border-[var(--separator)] bg-[var(--content)] px-2 py-1 text-[13px] outline-none focus:border-[var(--accent-strong)]"
+                    />
+                  }
+                />
               </Group>
 
               <Group title={tr("网络与诊断")}>

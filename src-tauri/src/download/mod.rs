@@ -1,4 +1,4 @@
-//! 下载引擎（T2）：串行队列 + Steam Guard 交互 + 产物收编
+//! 下载引擎（T2）：并行队列（并行度热读 `download_parallel` 设置，1..=6）+ Steam Guard 交互 + 产物收编
 //!
 //! 状态机：queued → authenticating → downloading → installing → done | failed
 //!
@@ -9,7 +9,7 @@ pub mod backend;
 pub mod pty;
 pub mod steamcmd_install;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -58,13 +58,19 @@ pub struct DownloadRow {
     pub finished_at: Option<i64>,
 }
 
+/// 每个任务独立的子进程槽：并行下载下 kill/wait 各锁各的槽，
+/// 不共享一把锁 —— 全局单槽会让一个任务的 wait 阻塞其它任务的退出检测/取消。
+type ChildSlot = Arc<tokio::sync::Mutex<Option<Child>>>;
+
 #[derive(Clone)]
 pub struct DownloadService {
     db: Arc<Mutex<Connection>>,
     app: AppHandle,
     guard_waiters: Arc<Mutex<HashMap<i64, oneshot::Sender<String>>>>,
-    current_task: Arc<Mutex<Option<i64>>>,
-    current_child: Arc<tokio::sync::Mutex<Option<Child>>>,
+    /// 正在运行的任务 id 集合（并行池；替代旧的单任务 current_task）
+    running: Arc<Mutex<HashSet<i64>>>,
+    /// task_id → 该任务的子进程槽（并行池）
+    children: Arc<tokio::sync::Mutex<HashMap<i64, ChildSlot>>>,
 }
 
 impl DownloadService {
@@ -73,8 +79,8 @@ impl DownloadService {
             db,
             app,
             guard_waiters: Arc::new(Mutex::new(HashMap::new())),
-            current_task: Arc::new(Mutex::new(None)),
-            current_child: Arc::new(tokio::sync::Mutex::new(None)),
+            running: Arc::new(Mutex::new(HashSet::new())),
+            children: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         }
     }
 
@@ -109,15 +115,43 @@ impl DownloadService {
 
     // ---------- 队列 ----------
 
+    /// 认领下一个排队任务：SELECT + 状态条件 UPDATE 在**同一把 DB 锁**内完成 ——
+    /// 并行 worker 并发认领时抢输的一方会看到状态已不是 queued（rows=0），换下一轮。
+    /// 认领即置 authenticating + started_at，run_task 开头的同款 update 只是幂等重申。
     fn next_queued(&self) -> Result<Option<(i64, String)>, String> {
         let conn = self.db.lock().map_err(|e| e.to_string())?;
-        conn.query_row(
-            "SELECT id, item_id FROM downloads WHERE status = 'queued' ORDER BY id LIMIT 1",
-            [],
-            |r| Ok((r.get(0)?, r.get(1)?)),
-        )
-        .optional()
-        .map_err(|e| e.to_string())
+        let cand = conn
+            .query_row(
+                "SELECT id, item_id FROM downloads WHERE status = 'queued' ORDER BY id LIMIT 1",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()
+            .map_err(|e| e.to_string())?;
+        let Some((id, item)) = cand else {
+            return Ok(None);
+        };
+        let claimed = conn
+            .execute(
+                "UPDATE downloads SET status = 'authenticating', started_at = unixepoch()
+                 WHERE id = ?1 AND status = 'queued'",
+                [id],
+            )
+            .map_err(|e| e.to_string())?;
+        Ok((claimed == 1).then_some((id, item)))
+    }
+
+    /// 并行下载数（设置 `download_parallel`：1..=6，默认 3）。每次调度热读 ——
+    /// 改小后在跑的任务自然跑完即收缩，改大下一轮调度立即补位，无需重启。
+    fn parallel_limit(&self) -> usize {
+        let v = self
+            .db
+            .lock()
+            .ok()
+            .and_then(|c| db::get_setting(&c, "download_parallel"))
+            .and_then(|raw| raw.trim().parse::<i64>().ok())
+            .unwrap_or(3);
+        v.clamp(1, 6) as usize
     }
 
     fn update(
@@ -209,6 +243,9 @@ impl DownloadService {
                 return;
             }
         };
+        // 并行下载：每任务独立工作目录。旧版共享目录在任务开头整目录清空，
+        // 并行会把别的任务的半成品删掉（install 收编也按此目录找产物）。
+        let workdir = workdir.join(format!("task-{task_id}"));
         let _ = std::fs::remove_dir_all(&workdir);
         if let Err(e) = std::fs::create_dir_all(&workdir) {
             self.fail(task_id, "IO_ERROR", &format!("创建工作目录失败: {e}"));
@@ -247,7 +284,7 @@ impl DownloadService {
 
         // 交互通道：*nix 上 steamcmd 的 stdin 必须是 TTY（管道会让它直接
         // "cannot read from the console" 退出）；Windows 走匿名管道（详见 pty.rs）。
-        let (mut writer, mut out_rx) = {
+        let (mut writer, mut out_rx, slot) = {
             let mut pty = match pty::Pty::open() {
                 Ok(p) => p,
                 Err(e) => {
@@ -272,8 +309,9 @@ impl DownloadService {
                     return;
                 }
             };
-            *self.current_child.lock().await = Some(child);
-            (writer, rx)
+            let slot: ChildSlot = Arc::new(tokio::sync::Mutex::new(Some(child)));
+            self.children.lock().await.insert(task_id, slot.clone());
+            (writer, rx, slot)
         };
 
         // steamcmd 下载期间零进度输出：轮询产物目录大小估算进度。
@@ -329,13 +367,14 @@ impl DownloadService {
                         tracing::info!("guard code submitted for task {task_id}");
                     } else {
                         st.error_msg = Some("Steam Guard 验证码输入超时".into());
-                        self.kill_current().await;
+                        self.kill_task(task_id).await;
                     }
                     st.guard_rx = None;
                     self.update(task_id, "authenticating", 0.0, None, None, false);
                 }
                 code = async {
-                    let mut g = self.current_child.lock().await;
+                    // 只锁本任务的槽：并行下别的任务 wait/kill 不会被这把锁拖住
+                    let mut g = slot.lock().await;
                     match g.as_mut() {
                         Some(c) => c.wait().await.ok(),
                         None => None,
@@ -350,7 +389,7 @@ impl DownloadService {
                         "下载超时（{} 分钟无输出），已中止",
                         watchdog.as_secs() / 60
                     ));
-                    self.kill_current().await;
+                    self.kill_task(task_id).await;
                     st.exit_code = Some(-2);
                     break;
                 }
@@ -359,7 +398,7 @@ impl DownloadService {
             // 匹配到成功行就主动收尾，不能等退出码。
             if st.success {
                 tracing::info!("task {task_id}: 成功标志已出现，主动结束 steamcmd");
-                self.kill_current().await;
+                self.kill_task(task_id).await;
                 st.exit_code = Some(0);
                 break;
             }
@@ -370,7 +409,7 @@ impl DownloadService {
         progress_poll.abort();
         // 任务结束，解除「等待手机确认」推测定时器（若尚未触发）
         st.mobile_hint_cancel.store(true, Ordering::SeqCst);
-        *self.current_child.lock().await = None;
+        self.children.lock().await.remove(&task_id);
 
         // 成功判定：以「成功行 + 产物真实存在」为准（登录验证任务无产物，只看成功行）。
         // 退出码不可信 —— macOS 上 steamcmd 下载成功后常卡在拆卸阶段被我们主动杀掉。
@@ -434,7 +473,9 @@ impl DownloadService {
         self.emit_progress(task_id, "installing", 100.0);
         let svc = self.clone();
         let item = item_id.clone();
-        let install_res = tokio::task::spawn_blocking(move || svc.install(item)).await;
+        let install_wd = workdir.clone();
+        let install_res =
+            tokio::task::spawn_blocking(move || svc.install(item, &install_wd)).await;
         match install_res {
             Ok(Ok(())) => {}
             Ok(Err(e)) => {
@@ -467,9 +508,13 @@ impl DownloadService {
         }
     }
 
-    async fn kill_current(&self) {
-        if let Some(c) = self.current_child.lock().await.as_mut() {
-            let _ = c.start_kill();
+    /// 结束某个任务的子进程（按 task_id 取它自己的槽，与其它并行任务互不干扰）
+    async fn kill_task(&self, task_id: i64) {
+        let slot = self.children.lock().await.get(&task_id).cloned();
+        if let Some(slot) = slot {
+            if let Some(c) = slot.lock().await.as_mut() {
+                let _ = c.start_kill();
+            }
         }
     }
 
@@ -763,7 +808,7 @@ impl DownloadService {
     }
 
     /// 收编：把下载产物移入壁纸库，解析 project.json 登记类型
-    fn install(&self, item_id: String) -> Result<(), String> {
+    fn install(&self, item_id: String, workdir: &Path) -> Result<(), String> {
         // 该 item 若是某壁纸的依赖（target_dir 记录合并目标，`|` 分隔多个，依赖链会传递），
         // 下载完成后需把产物合并回主壁纸目录
         let dependency_targets: Vec<PathBuf> = {
@@ -790,7 +835,7 @@ impl DownloadService {
             v
         };
 
-        let workdir = self.workdir()?;
+        // 产物就在本任务的独立工作目录里（并行下载各用各的，见 run_task）
         let steamcmd_path = workdir
             .join("steamapps/workshop/content")
             .join(APP_ID)
@@ -802,7 +847,7 @@ impl DownloadService {
             let entries = std::fs::read_dir(&workdir).map_err(|e| e.to_string())?;
             let has_content = entries.into_iter().next().is_some();
             if has_content {
-                src = Some(workdir.clone());
+                src = Some(workdir.to_path_buf());
             }
         }
         let Some(src) = src else {
@@ -1076,11 +1121,20 @@ impl DownloadService {
     }
 
     fn cancel(&self, task_id: i64) -> Result<(), String> {
-        let is_current = *self.current_task.lock().unwrap() == Some(task_id);
-        if is_current {
-            if let Ok(mut guard) = self.current_child.try_lock() {
-                if let Some(c) = guard.as_mut() {
-                    let _ = c.start_kill();
+        let is_running = self
+            .running
+            .lock()
+            .map(|g| g.contains(&task_id))
+            .unwrap_or(false);
+        if is_running {
+            // 杀本任务的子进程槽；try_lock 全程非阻塞（取消不能卡住调度循环）
+            if let Ok(map) = self.children.try_lock() {
+                if let Some(slot) = map.get(&task_id) {
+                    if let Ok(mut g) = slot.try_lock() {
+                        if let Some(c) = g.as_mut() {
+                            let _ = c.start_kill();
+                        }
+                    }
                 }
             }
             return Ok(());
@@ -1236,20 +1290,38 @@ pub fn init(app: &AppHandle) -> Result<(), String> {
             [],
         );
     }
+    // 上次运行的工作目录一律作废（任务已标记 RESTARTED 需要重下）：
+    // 兼容旧版共享目录与新�� per-task 目录两种布局
+    if let Ok(w) = svc.workdir() {
+        let _ = std::fs::remove_dir_all(&w);
+    }
 
-    // 串行 worker
+    // 并行下载池：并发度热读「并行下载数」（1..=6，默认 3）。
+    // 调小 → 在跑的任务跑完自然收缩；调大 → 下一轮调度立即补位。
     tauri::async_runtime::spawn(async move {
         loop {
-            let task = match svc.next_queued() {
-                Ok(Some(t)) => t,
-                _ => {
-                    tokio::time::sleep(Duration::from_millis(1000)).await;
-                    continue;
+            let limit = svc.parallel_limit();
+            let running = svc.running.lock().map(|g| g.len()).unwrap_or(0);
+            if running < limit {
+                match svc.next_queued() {
+                    Ok(Some((id, item))) => {
+                        svc.running.lock().unwrap().insert(id);
+                        let svc2 = svc.clone();
+                        tauri::async_runtime::spawn(async move {
+                            svc2.run_task(id, item).await;
+                            // 无论正常结束还是早退（fail 分支 return），统一出池
+                            svc2.children.lock().await.remove(&id);
+                            if let Ok(mut g) = svc2.running.lock() {
+                                g.remove(&id);
+                            }
+                        });
+                        continue; // 立即尝试补位到 limit
+                    }
+                    Ok(None) => {}
+                    Err(e) => tracing::warn!("download claim failed: {e}"),
                 }
-            };
-            *svc.current_task.lock().unwrap() = Some(task.0);
-            svc.run_task(task.0, task.1).await;
-            *svc.current_task.lock().unwrap() = None;
+            }
+            tokio::time::sleep(Duration::from_millis(400)).await;
         }
     });
     Ok(())
@@ -1261,13 +1333,8 @@ pub fn is_busy(app: &AppHandle) -> bool {
     let Some(svc) = app.try_state::<Arc<DownloadService>>() else {
         return false;
     };
-    // 内存侧：当前队列任务 / Guard 等待通道
-    if svc
-        .current_task
-        .lock()
-        .map(|t| t.is_some())
-        .unwrap_or(false)
-    {
+    // 内存侧：并行池在跑的任务 / Guard 等待通道
+    if svc.running.lock().map(|g| !g.is_empty()).unwrap_or(false) {
         return true;
     }
     if svc
