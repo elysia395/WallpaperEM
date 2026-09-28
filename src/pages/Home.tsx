@@ -154,7 +154,8 @@ export function HomePage({ onOpenDetail }: { onOpenDetail: (id: string) => void 
     setApplying(true);
     try {
       const r = await applyWithTarget(current.id, anchor);
-      if (r === "done") await refreshApplied();
+      // 停止某屏播放同样要刷新（条目可能退出已应用集合）
+      if (r !== "cancelled") await refreshApplied();
     } catch (e) {
       msg.error(String(e));
     } finally {
