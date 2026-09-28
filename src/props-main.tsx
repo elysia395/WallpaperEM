@@ -61,7 +61,7 @@ function PropsWindow() {
     <div
       className={`props-slide relative h-screen overflow-hidden ${
         rounded ? "rounded-[12px] ring-1 ring-[var(--card-border)]" : ""
-      } ${backdrop ? "" : "bg-[rgba(18,18,22,0.92)]"}`}
+      }`}
     >
       {/* 无边框窗口的边缘缩放把手（Win/Linux；macOS 靠系统） */}
       <ResizeHandles enabled={rounded} />
