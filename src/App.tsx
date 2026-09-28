@@ -130,7 +130,7 @@ function Shell() {
     : "overflow-hidden";
 
   return (
-    <div className={`relative flex h-full flex-col ${chrome} ${backdrop ? "" : "bg-[rgba(18,18,22,0.92)]"}`}>
+    <div className={`relative flex h-full flex-col ${chrome}`}>
       {/* 无边框窗口的边缘缩放把手（Win/Linux；macOS 靠系统） */}
       <ResizeHandles enabled={rounded} />
       {/* 页内玻璃背景：当前壁纸高斯模糊 + 深色 tint（样式见 index.css .app-backdrop）。
